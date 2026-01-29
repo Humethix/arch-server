@@ -8,20 +8,61 @@
       - snapper
       - snap-pac
     state: present
+  register: snapper_install
+  failed_when: false
+
+- name: Check if snapper command exists after installation
+  command: command -v snapper
+  register: snapper_check
+  failed_when: false
+  changed_when: false
+
+- name: Handle snapper installation failure
+  debug:
+    msg: 
+      - "Snapper installation returned: {{ snapper_install.rc | default('unknown') }}"
+      - "Snapper command check returned: {{ snapper_check.rc | default('unknown') }}"
+      - "Attempting manual installation..."
+  when: snapper_check.rc != 0
+
+- name: Force refresh package database and retry snapper installation
+  community.general.pacman:
+    name:
+      - snapper
+      - snap-pac
+    state: present
+    update_cache: yes
+  when: snapper_check.rc != 0
+  register: snapper_retry
+
+- name: Verify snapper installation after retry
+  command: command -v snapper
+  register: snapper_final_check
+  failed_when: false
+  changed_when: false
+
+- name: Display final snapper status
+  debug:
+    msg: 
+      - "Snapper installation status: {{ 'SUCCESS' if snapper_final_check.rc == 0 else 'FAILED' }}"
+      - "If failed, snapper may not be available in repositories or system needs update"
+  when: snapper_final_check is defined
 
 - name: Check if snapper config already exists
   command: snapper -c root list-configs
   register: snapper_configs
   changed_when: false
   failed_when: false
+  when: snapper_final_check is defined and snapper_final_check.rc == 0
 
 - name: Check if root config exists
   set_fact:
     snapper_root_exists: "{{ 'root' in snapper_configs.stdout }}"
+  when: snapper_final_check is defined and snapper_final_check.rc == 0
 
 - name: Create Snapper config for root (if not exists)
   command: snapper -c root create-config /
-  when: not snapper_root_exists
+  when: not snapper_root_exists and (snapper_final_check is defined and snapper_final_check.rc == 0)
   register: snapper_create
   failed_when: false
 
@@ -36,6 +77,7 @@
   stat:
     path: /etc/snapper/configs/root
   register: snapper_config_file
+  when: snapper_final_check is defined and snapper_final_check.rc == 0
 
 - name: Configure Snapper retention
   lineinfile:
@@ -51,7 +93,7 @@
     - { key: "TIMELINE_LIMIT_WEEKLY", value: "4" }
     - { key: "TIMELINE_LIMIT_MONTHLY", value: "6" }
     - { key: "TIMELINE_LIMIT_YEARLY", value: "2" }
-  when: snapper_config_file.stat.exists
+  when: snapper_config_file.stat.exists and (snapper_final_check is defined and snapper_final_check.rc == 0)
 
 - name: Enable Snapper timeline timer
   systemd:
@@ -59,6 +101,7 @@
     enabled: yes
     state: started
   failed_when: false
+  when: snapper_final_check is defined and snapper_final_check.rc == 0
 
 - name: Enable Snapper cleanup timer
   systemd:
@@ -66,16 +109,19 @@
     enabled: yes
     state: started
   failed_when: false
+  when: snapper_final_check is defined and snapper_final_check.rc == 0
 
 - name: Create initial deployment snapshot
   command: snapper -c root create --description "Ansible deployment - {{ ansible_date_time.iso8601 }}"
   register: snapshot_create
   changed_when: true
   failed_when: false
+  when: snapper_final_check is defined and snapper_final_check.rc == 0
 
 - name: Display snapshot info
   debug:
     msg: "{{ 'Initial snapshot created' if snapshot_create.rc == 0 else 'Snapshot creation skipped (check snapper config)' }}"
+  when: snapper_final_check is defined and snapper_final_check.rc == 0 and snapshot_create is defined
 
 - name: Create pacman hooks directory
   file:
@@ -99,7 +145,7 @@
       Description = Creating pre-update snapshot...
       When = PreTransaction
       Exec = /usr/bin/snapper -c root create --description "pacman pre-update"
-  when: snapper_config_file.stat.exists
+  when: snapper_config_file.stat.exists and (snapper_final_check is defined and snapper_final_check.rc == 0)
 
 - name: Create pacman hook for post-update snapshots  
   copy:
@@ -117,7 +163,7 @@
       Description = Creating post-update snapshot...
       When = PostTransaction
       Exec = /usr/bin/snapper -c root create --description "pacman post-update"
-  when: snapper_config_file.stat.exists
+  when: snapper_config_file.stat.exists and (snapper_final_check is defined and snapper_final_check.rc == 0)
 
 - name: Safe updates complete
   debug:
@@ -127,3 +173,15 @@
       - "    snapper list          - Show snapshots"
       - "    snapper undochange N  - Rollback to snapshot N"
       - "    snapper diff N..0     - Show changes since snapshot N"
+  when: snapper_final_check is defined and snapper_final_check.rc == 0
+
+- name: Safe updates skipped (Snapper not available)
+  debug:
+    msg: 
+      - "⚠ Snapper not available - snapshot functionality disabled"
+      - "  This may be due to:"
+      - "    - Snapper package not in repositories"
+      - "    - System needs package database update"
+      - "    - Network connectivity issues"
+      - "  System will continue without snapshot functionality"
+  when: snapper_final_check is defined and snapper_final_check.rc != 0

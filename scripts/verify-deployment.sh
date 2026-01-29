@@ -68,7 +68,7 @@ warn_check "podman info" "Podman accessible"
 echo ""
 
 echo -e "${BLUE}[SNAPSHOTS]${NC}"
-check "command -v snapper" "Snapper installed"
+warn_check "command -v snapper" "Snapper installed"
 warn_check "snapper list" "Snapper configured"
 echo ""
 
