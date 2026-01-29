@@ -1,0 +1,93 @@
+---
+- name: Deploy Secure Arch Linux Server v5.1
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    admin_user: admin
+    webserver_user: root
+    domain: "{{ lookup('env', 'DOMAIN') | default('', true) }}"
+    domain_email: "{{ lookup('env', 'DOMAIN_EMAIL') | default('', true) }}"
+    cloudflare_enabled: true
+
+  pre_tasks:
+    - name: Display deployment info
+      debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "  ARCH LINUX v5.1 SECURE SERVER DEPLOYMENT"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - ""
+          - "  Hostname: {{ ansible_facts['hostname'] }}"
+          - "  IP: {{ ansible_facts['default_ipv4']['address'] | default('N/A') }}"
+          - "  Domain: {{ domain if domain else 'IP-only mode' }}"
+          - "  Cloudflare: {{ 'ENABLED' if cloudflare_enabled else 'DISABLED' }}"
+          - ""
+
+  roles:
+    - role: base_hardening
+      tags: [base, hardening]
+
+    - role: security_stack
+      tags: [security, firewall]
+
+    - role: container_runtime
+      tags: [containers, podman]
+
+    - role: cloudflare
+      tags: [cloudflare, network]
+      when: cloudflare_enabled
+
+    - role: crowdsec
+      tags: [crowdsec, security]
+
+    - role: webserver
+      tags: [web, caddy]
+
+    - role: cgit
+      tags: [cgit, git]
+      when: cgit_enabled | default(false)
+
+    - role: monitoring
+      tags: [monitoring]
+
+    - role: safe_updates
+      tags: [updates, snapshots]
+
+  post_tasks:
+    - name: Run health check
+      command: /usr/local/bin/health-check
+      register: health
+      failed_when: false
+      changed_when: false
+    
+    - name: Display health results
+      debug:
+        var: health.stdout_lines
+      when: health.stdout_lines is defined
+    
+    - name: Deployment complete
+      debug:
+        msg:
+          - ""
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "  ✓ DEPLOYMENT COMPLETE!"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - ""
+          - "  Server Status: LIVE & SECURE"
+          - ""
+          - "  Services:"
+          - "    • Caddy Web Server: systemctl status caddy"
+          - "    • Firewall: systemctl status nftables"
+          - "    • Snapshots: snapper list"
+          - ""
+          - "  Access:"
+          - "    • Local: http://{{ ansible_facts['default_ipv4']['address'] | default('localhost') }}"
+          - "    • Domain: {{ 'https://' + domain if domain else 'N/A (no domain set)' }}"
+          - ""
+          - "  Next Steps:"
+          - "    1. Setup Cloudflare: /root/arch/scripts/setup-cloudflare.sh"
+          - "    2. Verify: /usr/local/bin/health-check"
+          - ""

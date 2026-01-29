@@ -1,0 +1,157 @@
+# Arch Server v5.1 - Taskfile
+# https://taskfile.dev
+# Install: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin
+
+version: '3'
+
+vars:
+  PROJECT_NAME: arch-server
+  VERSION: 5.1.0
+
+tasks:
+  # ==========================================================================
+  # DEFAULT
+  # ==========================================================================
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # ==========================================================================
+  # SETUP
+  # ==========================================================================
+  setup:
+    desc: Setup development environment
+    cmds:
+      - pip install -r requirements.txt
+      - pre-commit install
+      - echo "✓ Development environment ready"
+
+  # ==========================================================================
+  # LINT
+  # ==========================================================================
+  lint:
+    desc: Run all linters
+    cmds:
+      - task: lint:shell
+      - task: lint:yaml
+      - task: lint:ansible
+      - task: lint:markdown
+
+  lint:shell:
+    desc: Lint shell scripts with shellcheck
+    cmds:
+      - shellcheck src/install.sh src/config-validate.sh src/config-setup.sh scripts/*.sh
+    sources:
+      - "**/*.sh"
+
+  lint:yaml:
+    desc: Lint YAML files
+    cmds:
+      - yamllint -c .yamllint.yml .
+    sources:
+      - "**/*.yml"
+      - "**/*.yaml"
+
+  lint:ansible:
+    desc: Lint Ansible playbooks and roles
+    cmds:
+      - ansible-lint src/ansible/
+    sources:
+      - "src/ansible/**/*"
+
+  lint:markdown:
+    desc: Lint Markdown files
+    cmds:
+      - markdownlint '**/*.md' --disable MD013 || true
+
+  # ==========================================================================
+  # TEST
+  # ==========================================================================
+  test:
+    desc: Run all tests
+    cmds:
+      - task: test:syntax
+      - task: test:python
+
+  test:syntax:
+    desc: Check Ansible syntax
+    cmds:
+      - ansible-playbook --syntax-check src/ansible/playbooks/site.yml
+      - ansible-playbook --syntax-check src/ansible/playbooks/go-live.yml
+
+  test:python:
+    desc: Run Python tests
+    cmds:
+      - pytest tests/ -v
+    sources:
+      - "tests/**/*"
+      - "src/**/*"
+
+  # ==========================================================================
+  # BUILD
+  # ==========================================================================
+  build:
+    desc: Build release archive
+    cmds:
+      - |
+        tar -czvf {{.PROJECT_NAME}}-v{{.VERSION}}.tar.gz \
+          --exclude='.git' \
+          --exclude='.gitlab' \
+          --exclude='keys/*' \
+          --exclude='*.tar.gz' \
+          --exclude='__pycache__' \
+          --exclude='.venv' \
+          .
+      - echo "✓ Created {{.PROJECT_NAME}}-v{{.VERSION}}.tar.gz"
+
+  # ==========================================================================
+  # DOCS
+  # ==========================================================================
+  docs:
+    desc: Build documentation
+    cmds:
+      - mkdocs build
+
+  docs:serve:
+    desc: Serve documentation locally
+    cmds:
+      - mkdocs serve
+
+  # ==========================================================================
+  # CLEAN
+  # ==========================================================================
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf site/ public/ dist/ build/
+      - rm -rf __pycache__ .pytest_cache .coverage
+      - rm -f *.tar.gz
+      - find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+      - echo "✓ Cleaned build artifacts"
+
+  # ==========================================================================
+  # DEVELOPMENT HELPERS
+  # ==========================================================================
+  check:
+    desc: Run pre-commit on all files
+    cmds:
+      - pre-commit run --all-files
+
+  format:
+    desc: Format code
+    cmds:
+      - black tests/
+      - isort tests/
+
+  # ==========================================================================
+  # RELEASE
+  # ==========================================================================
+  release:
+    desc: Create a new release
+    cmds:
+      - echo "Creating release v{{.VERSION}}"
+      - task: lint
+      - task: test
+      - task: build
+      - echo "✓ Release v{{.VERSION}} ready"

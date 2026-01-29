@@ -1,0 +1,21 @@
+# cgit configuration for Caddy
+# Managed by Ansible
+
+# cgit static files
+handle_path /cgit-css/* {
+    root * /usr/share/webapps/cgit
+    file_server
+    header Cache-Control "max-age=2592000"
+}
+
+# cgit CGI
+handle /git/* {
+    reverse_proxy unix//run/fcgiwrap.sock {
+        transport fastcgi {
+            root /usr/share/webapps/cgit
+            env SCRIPT_FILENAME /usr/share/webapps/cgit/cgit.cgi
+            env PATH_INFO {path}
+            env QUERY_STRING {query}
+        }
+    }
+}

@@ -1,0 +1,338 @@
+---
+# Webserver Role for Arch Linux v5.1
+# Caddy as SYSTEM service (not user service) for reliability
+
+- name: Install webserver dependencies
+  community.general.pacman:
+    name:
+      - wget
+      - curl
+      - tar
+    state: present
+
+- name: Create Caddy directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/caddy
+    - /opt/caddy/config
+    - /opt/caddy/data
+    - /opt/caddy/sites
+    - /var/log/caddy
+
+- name: Check if Caddy binary exists
+  stat:
+    path: /opt/caddy/caddy
+  register: caddy_binary
+
+- name: Download Caddy
+  get_url:
+    url: https://github.com/caddyserver/caddy/releases/download/v2.7.6/caddy_2.7.6_linux_amd64.tar.gz
+    dest: /tmp/caddy.tar.gz
+    mode: '0644'
+  when: not caddy_binary.stat.exists
+
+- name: Extract Caddy
+  unarchive:
+    src: /tmp/caddy.tar.gz
+    dest: /opt/caddy
+    remote_src: yes
+    creates: /opt/caddy/caddy
+  when: not caddy_binary.stat.exists
+
+- name: Make Caddy executable
+  file:
+    path: /opt/caddy/caddy
+    mode: '0755'
+
+- name: Set capability for port binding
+  command: setcap CAP_NET_BIND_SERVICE=+eip /opt/caddy/caddy
+  changed_when: false
+
+- name: Deploy Caddyfile
+  copy:
+    dest: /opt/caddy/config/Caddyfile
+    mode: '0644'
+    content: |
+      # Arch Linux v5.1 - Caddy Configuration
+      {
+        admin off
+        auto_https disable_redirects
+      }
+      
+      :80 {
+        root * /opt/caddy/sites
+        file_server
+        encode gzip zstd
+        
+        header {
+          X-Content-Type-Options "nosniff"
+          X-Frame-Options "DENY"
+          Referrer-Policy "strict-origin-when-cross-origin"
+          -Server
+        }
+        
+        log {
+          output file /var/log/caddy/access.log {
+            roll_size 50mb
+            roll_keep 5
+          }
+          format json
+        }
+        
+        respond /health 200 {
+          body "OK"
+        }
+      }
+  notify: Restart Caddy
+
+- name: Deploy default website
+  copy:
+    dest: /opt/caddy/sites/index.html
+    mode: '0644'
+    content: |
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Arch Linux v5.1 - Server Live</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { 
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #e0e0e0;
+          }
+          .container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            padding: 48px;
+            max-width: 900px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.5);
+          }
+          h1 {
+            color: #00d9ff;
+            font-size: 2.8em;
+            margin-bottom: 16px;
+            text-shadow: 0 0 30px rgba(0, 217, 255, 0.5);
+          }
+          .status {
+            background: linear-gradient(90deg, #00c853, #00e676);
+            color: #000;
+            padding: 12px 28px;
+            border-radius: 30px;
+            margin: 16px 0;
+            display: inline-block;
+            font-weight: 700;
+            font-size: 1.1em;
+            box-shadow: 0 4px 20px rgba(0, 200, 83, 0.4);
+          }
+          .features {
+            margin-top: 40px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+          }
+          .feature {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 24px;
+            border-radius: 16px;
+            border-left: 4px solid #00d9ff;
+            transition: transform 0.3s, background 0.3s;
+          }
+          .feature:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.08);
+          }
+          .feature h3 {
+            color: #00d9ff;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+          }
+          .feature p {
+            color: #a0a0a0;
+            font-size: 0.95em;
+            line-height: 1.5;
+          }
+          .footer {
+            margin-top: 40px;
+            text-align: center;
+            color: #606060;
+            font-size: 0.9em;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>🚀 Arch Linux v5.1</h1>
+          <div class="status">✓ LIVE & SECURE</div>
+          
+          <div class="features">
+            <div class="feature">
+              <h3>🔒 LUKS2 Encryption</h3>
+              <p>Full disk encryption with Argon2id and TPM auto-unlock</p>
+            </div>
+            <div class="feature">
+              <h3>🛡️ Cloudflare Protected</h3>
+              <p>Firewall only allows Cloudflare IPs - DDoS protected</p>
+            </div>
+            <div class="feature">
+              <h3>📦 Rootless Containers</h3>
+              <p>Podman with zero root privileges for maximum isolation</p>
+            </div>
+            <div class="feature">
+              <h3>⏮️ Btrfs Snapshots</h3>
+              <p>Auto-rollback on failed updates with Snapper</p>
+            </div>
+            <div class="feature">
+              <h3>🔥 nftables Firewall</h3>
+              <p>Rate limiting and intelligent threat blocking</p>
+            </div>
+            <div class="feature">
+              <h3>🔐 Defense-in-Depth</h3>
+              <p>AppArmor + auditd + hardened kernel</p>
+            </div>
+          </div>
+          
+          <div class="footer">
+            Arch Linux v5.1 Secure Server | systemd-boot + UKI + Btrfs
+          </div>
+        </div>
+      </body>
+      </html>
+
+- name: Create Caddy systemd service
+  copy:
+    dest: /etc/systemd/system/caddy.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Caddy Web Server
+      Documentation=https://caddyserver.com/docs/
+      After=network.target network-online.target
+      Wants=network-online.target
+      
+      [Service]
+      Type=notify
+      User=root
+      Group=root
+      
+      WorkingDirectory=/opt/caddy
+      ExecStart=/opt/caddy/caddy run --config /opt/caddy/config/Caddyfile
+      ExecReload=/opt/caddy/caddy reload --config /opt/caddy/config/Caddyfile --force
+      
+      TimeoutStartSec=60
+      TimeoutStopSec=10
+      
+      Restart=on-failure
+      RestartSec=5s
+      StartLimitInterval=60
+      StartLimitBurst=3
+      
+      # Security hardening
+      NoNewPrivileges=yes
+      PrivateTmp=yes
+      ProtectSystem=strict
+      ProtectHome=yes
+      ReadWritePaths=/opt/caddy/data /var/log/caddy /opt/caddy/config
+      
+      # Resource limits
+      LimitNOFILE=65535
+      
+      # Environment
+      Environment=CADDY_INGRESS_NETWORKS=caddy
+      Environment=CADDY_DOCKER_HOST=unix:///var/run/docker.sock
+      
+      [Install]
+      WantedBy=multi-user.target
+  notify: Reload systemd
+
+- name: Enable and start Caddy
+  systemd:
+    name: caddy
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  register: caddy_service
+  failed_when: false
+
+- name: Check Caddy service status
+  command: systemctl status caddy
+  register: caddy_status
+  changed_when: false
+  failed_when: false
+  when: caddy_service.failed is defined
+
+- name: Debug Caddy service failure
+  debug:
+    msg:
+      - "Caddy service failed to start"
+      - "Status: {{ caddy_status.stdout_lines | default(['no output']) }}"
+      - "Error: {{ caddy_status.stderr_lines | default(['no error']) }}"
+  when: caddy_service.failed is defined
+
+- name: Get Caddy journal logs
+  command: journalctl -u caddy --no-pager -n 20
+  register: caddy_journal
+  changed_when: false
+  failed_when: false
+  when: caddy_service.failed is defined
+
+- name: Show Caddy logs
+  debug:
+    msg:
+      - "Caddy journal logs:"
+      - "{{ caddy_journal.stdout_lines | default(['no logs']) }}"
+  when: caddy_service.failed is defined
+
+- name: Try manual Caddy start for debugging
+  command: /opt/caddy/caddy run --config /opt/caddy/config/Caddyfile --adapter caddyfile
+  args:
+    chdir: /opt/caddy
+  register: caddy_manual
+  changed_when: false
+  failed_when: false
+  when: caddy_service.failed is defined
+  async: 10
+  poll: 0
+
+- name: Wait a moment for manual start
+  pause:
+    seconds: 3
+  when: caddy_service.failed is defined
+
+- name: Kill manual Caddy process
+  command: pkill -f "caddy run"
+  changed_when: false
+  failed_when: false
+  when: caddy_service.failed is defined
+
+- name: Wait for Caddy to start
+  wait_for:
+    port: 80
+    delay: 2
+    timeout: 30
+
+- name: Verify Caddy is running
+  uri:
+    url: http://localhost/health
+    return_content: yes
+  register: health_check
+  retries: 3
+  delay: 2
+  until: health_check.status == 200
+  failed_when: false
+
+- name: Webserver status
+  debug:
+    msg: "✓ Caddy web server is {{ 'running' if health_check.status == 200 else 'starting...' }}"

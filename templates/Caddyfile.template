@@ -1,0 +1,70 @@
+# Caddy Configuration Template
+# Arch Server v5.1
+#
+# Variables:
+#   {{DOMAIN}} - Your domain name
+#   {{EMAIL}} - Let's Encrypt email
+#
+# Usage: Replace variables and copy to /opt/caddy/config/Caddyfile
+
+{
+    # Global options
+    admin off
+    {{#if EMAIL}}
+    email {{EMAIL}}
+    {{/if}}
+}
+
+# HTTP only (no domain)
+{{#unless DOMAIN}}
+:80 {
+    root * /opt/caddy/sites
+    file_server
+    encode gzip zstd
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+
+    respond /health 200 {
+        body "OK"
+    }
+}
+{{/unless}}
+
+# HTTPS with domain
+{{#if DOMAIN}}
+{{DOMAIN}} {
+    root * /opt/caddy/sites
+    file_server
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "interest-cohort=()"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+        format json
+    }
+
+    respond /health 200 {
+        body "OK"
+    }
+}
+{{/if}}

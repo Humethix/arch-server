@@ -1,0 +1,59 @@
+---
+# CrowdSec Role for Arch Linux v5.1
+# NOTE: CrowdSec is NOT in official Arch repos - requires AUR
+
+- name: Check if CrowdSec is installed
+  command: pacman -Q crowdsec
+  register: crowdsec_installed
+  failed_when: false
+  changed_when: false
+
+- name: CrowdSec installation notice
+  debug:
+    msg:
+      - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - "  CrowdSec Status"
+      - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - ""
+      - "  CrowdSec is NOT available in official Arch repos."
+      - "  It requires the AUR (Arch User Repository)."
+      - ""
+      - "  To install manually:"
+      - "    1. Install yay: pacman -S --needed git base-devel"
+      - "       git clone https://aur.archlinux.org/yay.git"
+      - "       cd yay && makepkg -si"
+      - ""
+      - "    2. Install CrowdSec: yay -S crowdsec"
+      - ""
+      - "    3. Re-run this playbook with crowdsec tag"
+      - ""
+  when: crowdsec_installed.rc != 0
+
+- name: Configure CrowdSec (if installed)
+  when: crowdsec_installed.rc == 0
+  block:
+    - name: Deploy CrowdSec configuration
+      template:
+        src: config.yaml.j2
+        dest: /etc/crowdsec/config.yaml
+        mode: '0644'
+      notify: Restart CrowdSec
+
+    - name: Install CrowdSec collections
+      command: cscli collections install crowdsecurity/{{ item }}
+      loop:
+        - linux
+        - base-http-scenarios
+      register: collections
+      changed_when: "'installed' in collections.stdout"
+      failed_when: false
+
+    - name: Enable CrowdSec service
+      systemd:
+        name: crowdsec
+        enabled: yes
+        state: started
+
+    - name: CrowdSec enabled
+      debug:
+        msg: "✓ CrowdSec is installed and running"

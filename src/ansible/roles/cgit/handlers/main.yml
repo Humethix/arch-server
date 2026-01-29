@@ -1,0 +1,16 @@
+---
+# cgit role handlers
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: Restart cgit
+  systemd:
+    name: fcgiwrap.socket
+    state: restarted
+
+- name: Restart Caddy
+  systemd:
+    name: caddy
+    state: restarted

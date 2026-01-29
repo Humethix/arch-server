@@ -1,0 +1,18 @@
+# Arch Server v5.1 - Python Requirements
+# Install with: pip install -r requirements.txt
+
+# Ansible
+ansible>=2.15.0
+ansible-lint>=6.22.0
+
+# Testing
+pytest>=7.4.0
+pytest-testinfra>=10.0.0
+
+# Development
+pre-commit>=3.6.0
+yamllint>=1.33.0
+
+# Documentation
+mkdocs>=1.5.0
+mkdocs-material>=9.5.0

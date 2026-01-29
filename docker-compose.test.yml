@@ -1,0 +1,57 @@
+# ============================================================================
+# ARCH SERVER v5.1 - TEST DOCKER COMPOSE
+# Run syntax validation and linting in containers
+# ============================================================================
+#
+# USAGE:
+#   docker-compose -f docker-compose.test.yml up --build
+#   docker-compose -f docker-compose.test.yml run --rm test bash  # Interactive
+#
+# ============================================================================
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: arch-server-test
+    volumes:
+      # Mount source for live editing (optional)
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./tests:/app/tests:ro
+    environment:
+      - TERM=xterm-256color
+
+  # Quick lint-only service
+  lint:
+    image: koalaman/shellcheck-alpine:stable
+    container_name: arch-server-lint
+    volumes:
+      - ./src:/mnt/src:ro
+      - ./scripts:/mnt/scripts:ro
+    command: >
+      sh -c '
+        echo "=== Shellcheck: src/*.sh ===" &&
+        shellcheck -e SC2317,SC1091 /mnt/src/*.sh &&
+        echo "=== Shellcheck: scripts/*.sh ===" &&
+        shellcheck -e SC2317,SC1091 /mnt/scripts/*.sh &&
+        echo "=== All checks passed ==="
+      '
+
+  # Ansible syntax check only
+  ansible-check:
+    image: cytopia/ansible-lint:latest
+    container_name: arch-server-ansible
+    volumes:
+      - ./src/ansible:/data:ro
+    working_dir: /data
+    command: >
+      sh -c '
+        echo "=== Ansible Lint ===" &&
+        ansible-lint playbooks/*.yml &&
+        echo "=== Syntax Check ===" &&
+        ansible-playbook --syntax-check playbooks/site.yml &&
+        ansible-playbook --syntax-check playbooks/go-live.yml &&
+        echo "=== All Ansible checks passed ==="
+      '

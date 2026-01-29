@@ -1,0 +1,55 @@
+# cgit configuration - Arch Linux v5.1
+# Managed by Ansible
+
+# Global settings
+virtual-root=/git/
+css=/cgit-css/cgit.css
+logo=/cgit-css/cgit.png
+favicon=/cgit-css/favicon.ico
+
+# Enable caching
+cache-size=1000
+cache-dynamic-ttl=5
+cache-static-ttl=-1
+cache-repo-ttl=5
+cache-root=/var/cache/cgit
+
+# Repository settings
+enable-git-config=1
+enable-index-links=1
+enable-index-owner=1
+enable-log-filecount=1
+enable-log-linecount=1
+enable-commit-graph=1
+enable-blame=1
+enable-tree-linenumbers=1
+
+# Clone URLs
+{% if domain is defined and domain %}
+clone-prefix=https://{{ domain }}/git ssh://git@{{ domain }}
+{% else %}
+clone-prefix=git://localhost ssh://git@localhost
+{% endif %}
+
+# Syntax highlighting
+source-filter=/usr/lib/cgit/filters/syntax-highlighting.py
+about-filter=/usr/lib/cgit/filters/about-formatting.sh
+
+# Branch sorting
+branch-sort=age
+
+# Max display settings
+max-stats=quarter
+max-commit-count=100
+max-message-length=100
+
+# Root title and description
+root-title={{ ansible_facts['hostname'] }} Git Repositories
+root-desc=Hosted on Arch Linux v5.1
+root-readme=/srv/git/README.md
+
+# Footer
+footer=cgit powered by Arch Linux v5.1
+
+# Scan for repositories
+scan-path=/srv/git

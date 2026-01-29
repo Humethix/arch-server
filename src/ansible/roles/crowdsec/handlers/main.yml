@@ -1,0 +1,10 @@
+---
+- name: Restart CrowdSec
+  systemd:
+    name: crowdsec
+    state: restarted
+
+- name: Restart nftables bouncer
+  systemd:
+    name: crowdsec-firewall-bouncer
+    state: restarted

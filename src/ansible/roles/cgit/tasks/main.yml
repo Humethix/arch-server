@@ -1,0 +1,108 @@
+---
+# cgit Role for Arch Linux v5.1
+# Lightweight git repository web viewer
+
+- name: Install cgit and dependencies
+  community.general.pacman:
+    name:
+      - cgit
+      - git
+      - fcgiwrap
+      - python
+      - python-pygments
+      - python-markdown
+      - highlight
+    state: present
+
+- name: Create git directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: http
+    group: http
+    mode: '0755'
+  loop:
+    - /srv/git
+    - /var/cache/cgit
+
+- name: Deploy cgitrc configuration
+  template:
+    src: cgitrc.j2
+    dest: /etc/cgitrc
+    mode: '0644'
+  notify: Restart cgit
+
+- name: Deploy cgit Caddy configuration
+  template:
+    src: cgit-caddy.j2
+    dest: /opt/caddy/config/cgit.caddy
+    mode: '0644'
+  notify: Restart Caddy
+
+- name: Create fcgiwrap systemd socket
+  copy:
+    dest: /etc/systemd/system/fcgiwrap.socket
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=fcgiwrap Socket
+
+      [Socket]
+      ListenStream=/run/fcgiwrap.sock
+      SocketUser=http
+      SocketGroup=http
+      SocketMode=0660
+
+      [Install]
+      WantedBy=sockets.target
+  notify: Reload systemd
+
+- name: Create fcgiwrap systemd service
+  copy:
+    dest: /etc/systemd/system/fcgiwrap.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=fcgiwrap CGI daemon
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=http
+      Group=http
+      ExecStart=/usr/bin/fcgiwrap -s unix:/run/fcgiwrap.sock
+      Restart=on-failure
+
+      # Security hardening
+      NoNewPrivileges=yes
+      PrivateTmp=yes
+      ProtectSystem=strict
+      ProtectHome=yes
+      ReadWritePaths=/srv/git /var/cache/cgit
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Reload systemd
+
+- name: Enable and start fcgiwrap socket
+  systemd:
+    name: fcgiwrap.socket
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Update main Caddyfile to include cgit
+  lineinfile:
+    path: /opt/caddy/config/Caddyfile
+    line: 'import /opt/caddy/config/*.caddy'
+    insertafter: 'auto_https disable_redirects'
+  notify: Restart Caddy
+
+- name: Verify cgit installation
+  stat:
+    path: /usr/share/webapps/cgit/cgit.cgi
+  register: cgit_cgi
+
+- name: cgit status
+  debug:
+    msg: "cgit is {{ 'installed' if cgit_cgi.stat.exists else 'NOT installed' }}"
