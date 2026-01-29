@@ -11,6 +11,7 @@
 - 🚀 **systemd-boot + UKI** - Modern bootloader with Unified Kernel Images
 - 📁 **Btrfs Snapshots** - Automatic rollback on failed updates
 - 🛡️ **Defense-in-Depth** - nftables + AppArmor + auditd
+- 🔍 **Security Audit** - Comprehensive security scoring and reporting
 - 🌐 **Cloudflare Ready** - Firewall only allows Cloudflare IPs
 - 📦 **Podman Containers** - Rootless container runtime
 - ⚡ **Caddy Web Server** - Automatic HTTPS with HTTP/3
@@ -167,6 +168,7 @@ DOMAIN="yourdomain.com"                  # For auto SSL
 | **SSH** | Key-based auth, rate limiting |
 | **AppArmor** | Mandatory access control |
 | **Auditd** | Security event logging |
+| **Security Audit** | Comprehensive security scoring and analysis |
 | **Snapshots** | Btrfs snapshots with Snapper |
 
 ## 📦 Ansible Roles
@@ -207,6 +209,33 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 - [Configuration Reference](docs/configuration.md)
 - [Deployment Guide](docs/deployment.md)
 - [Security Guide](docs/security.md)
+- [Security Audit Guide](docs/security-audit.md)
+
+## 🔍 Security Audit
+
+Run comprehensive security analysis:
+
+```bash
+# Basic audit
+/usr/local/bin/security-audit
+
+# Detailed audit with verbose output
+/usr/local/bin/security-audit --verbose
+
+# JSON output for automation
+/usr/local/bin/security-audit --json
+
+# Save report to specific file
+/usr/local/bin/security-audit --output /path/to/report.txt
+```
+
+The security audit evaluates all 6 security layers:
+1. **Encryption** - LUKS2, TPM, algorithm strength
+2. **Boot Security** - Secure Boot, UKI, hardened kernel
+3. **Network Security** - Firewall, Cloudflare-only, sysctls
+4. **Access Control** - SSH hardening, sudo, brute force protection
+5. **System Security** - AppArmor, auditd, system hardening
+6. **Recovery Security** - Btrfs snapshots, backup systems
 
 ## 🤝 Contributing
 

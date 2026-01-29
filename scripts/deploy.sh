@@ -222,9 +222,23 @@ else
     fi
 fi
 
-# Phase 4: Summary
+# Phase 4: Security Audit
 log ""
-log "Phase 4: Deployment Summary"
+log "Phase 4: Running comprehensive security audit..."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Run security audit if available
+if [ -x /usr/local/bin/security-audit ]; then
+    log "Executing comprehensive security audit..."
+    /usr/local/bin/security-audit --verbose
+    log "✓ Security audit complete - report saved to /tmp/"
+else
+    warn "Security audit script not available"
+fi
+
+# Phase 5: Summary
+log ""
+log "Phase 5: Deployment Summary"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Get IP
@@ -254,13 +268,19 @@ NEXT STEPS:
   1. Setup Cloudflare Tunnel (for public access):
      $PROJECT_DIR/scripts/setup-cloudflare.sh
 
-  2. Verify deployment:
+  2. Run comprehensive security audit:
+     /usr/local/bin/security-audit
+
+  3. View detailed security report:
+     cat /tmp/security-audit-*.txt
+
+  4. Verify deployment:
      /usr/local/bin/health-check
 
-  3. View web server:
+  5. View web server:
      curl http://localhost/
 
-  4. Check logs:
+  6. Check logs:
      journalctl -u caddy -f
 
 EOF

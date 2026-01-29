@@ -163,6 +163,12 @@
     dest: /usr/local/bin/health-check
     mode: '0755'
 
+- name: Install comprehensive security audit script
+  copy:
+    src: security-audit
+    dest: /usr/local/bin/security-audit
+    mode: '0755'
+
 - name: Base hardening complete
   debug:
     msg: "✓ Base hardening applied successfully"

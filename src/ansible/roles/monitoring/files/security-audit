@@ -1,0 +1,764 @@
+#!/bin/bash
+# Comprehensive Security Audit Script for Arch Linux v5.1
+# Deep security analysis with scoring and detailed reporting
+
+set -euo pipefail
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m'
+
+# Global variables
+TOTAL_SCORE=0
+MAX_SCORE=0
+REPORT_FILE="/tmp/security-audit-$(date +%Y%m%d-%H%M%S).txt"
+JSON_OUTPUT=false
+VERBOSE=false
+
+# Layer scores
+declare -A LAYER_SCORES
+declare -A LAYER_MAX_SCORES
+declare -A SECURITY_FINDINGS
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --json)
+            JSON_OUTPUT=true
+            shift
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --output)
+            REPORT_FILE="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: $0 [--json] [--verbose] [--output <file>]"
+            echo "  --json     Output in JSON format"
+            echo "  --verbose  Show detailed test output"
+            echo "  --output   Save report to specific file"
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Initialize scoring
+init_scoring() {
+    LAYER_SCORES[encryption]=0
+    LAYER_SCORES[boot]=0
+    LAYER_SCORES[network]=0
+    LAYER_SCORES[access]=0
+    LAYER_SCORES[system]=0
+    LAYER_SCORES[recovery]=0
+    
+    LAYER_MAX_SCORES[encryption]=100
+    LAYER_MAX_SCORES[boot]=100
+    LAYER_MAX_SCORES[network]=100
+    LAYER_MAX_SCORES[access]=100
+    LAYER_MAX_SCORES[system]=100
+    LAYER_MAX_SCORES[recovery]=100
+    
+    SECURITY_FINDINGS=()
+}
+
+# Scoring functions
+add_score() {
+    local layer="$1"
+    local points="$2"
+    local max_points="$3"
+    local description="$4"
+    local severity="${5:-info}"
+    
+    LAYER_SCORES[$layer]=$((LAYER_SCORES[$layer] + points))
+    TOTAL_SCORE=$((TOTAL_SCORE + points))
+    MAX_SCORE=$((MAX_SCORE + max_points))
+    
+    SECURITY_FINDINGS+=("$layer|$points|$max_points|$description|$severity")
+    
+    if $VERBOSE; then
+        local status=""
+        if [[ $points -eq $max_points ]]; then
+            status="${GREEN}✓ PASS${NC}"
+        elif [[ $points -gt 0 ]]; then
+            status="${YELLOW}⚠ PARTIAL${NC}"
+        else
+            status="${RED}✗ FAIL${NC}"
+        fi
+        echo -e "  $status $description ($points/$max_points)"
+    fi
+}
+
+# Header
+print_header() {
+    if ! $JSON_OUTPUT; then
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════╗"
+        echo "║                    COMPREHENSIVE SECURITY AUDIT               ║"
+        echo "║                          Arch Linux v5.1                       ║"
+        echo "╚════════════════════════════════════════════════════════════════╝"
+        echo ""
+        echo -e "${CYAN}Audit Date:${NC} $(date '+%Y-%m-%d %H:%M:%S')"
+        echo -e "${CYAN}Hostname:${NC} $(hostname)"
+        echo -e "${CYAN}Kernel:${NC} $(uname -r)"
+        echo ""
+    fi
+}
+
+# Layer 1: Encryption Security
+audit_encryption() {
+    if ! $JSON_OUTPUT; then
+        echo -e "${PURPLE}[LAYER 1: ENCRYPTION]${NC}"
+        echo -e "${BLUE}Testing LUKS2 encryption and TPM security...${NC}"
+    fi
+    
+    local layer_score=0
+    local layer_max=0
+    
+    # Check if LUKS is active
+    if lsblk -o TYPE,MOUNTPOINT | grep -q "crypt"; then
+        add_score "encryption" 25 25 "LUKS encryption active" "critical"
+    else
+        add_score "encryption" 0 25 "No LUKS encryption detected" "critical"
+    fi
+    
+    # Check LUKS2 format
+    if command -v cryptsetup &>/dev/null; then
+        if cryptsetup --version | grep -q "2\."; then
+            add_score "encryption" 15 15 "LUKS2 format supported" "high"
+        else
+            add_score "encryption" 5 15 "Legacy LUKS format" "medium"
+        fi
+    else
+        add_score "encryption" 0 15 "cryptsetup not available" "high"
+    fi
+    
+    # Check TPM availability
+    if [[ -e /dev/tpm0 ]] || [[ -e /dev/tpmrm0 ]]; then
+        add_score "encryption" 20 20 "TPM device available" "high"
+        
+        # Check if TPM is being used
+        if systemctl is-active tpm2-abrmd &>/dev/null || systemctl is-active tcsd &>/dev/null; then
+            add_score "encryption" 10 10 "TPM service active" "high"
+        else
+            add_score "encryption" 5 10 "TPM device present but service not active" "medium"
+        fi
+    else
+        add_score "encryption" 0 20 "No TPM device found" "medium"
+    fi
+    
+    # Check for LUKS header backup
+    if [[ -f /root/luks-backup.bin ]] || [[ -f /etc/luks-backup.bin ]]; then
+        add_score "encryption" 10 10 "LUKS header backup exists" "medium"
+    else
+        add_score "encryption" 0 10 "No LUKS header backup found" "medium"
+    fi
+    
+    # Check encryption algorithm strength
+    if command -v cryptsetup &>/dev/null && lsblk -o TYPE | grep -q "crypt"; then
+        # Try to detect cipher strength (simplified check)
+        if dmsetup table | grep -q "aes-xts-plain64"; then
+            add_score "encryption" 20 20 "Strong AES-XTS encryption in use" "high"
+        else
+            add_score "encryption" 10 20 "Encryption detected but algorithm unknown" "medium"
+        fi
+    else
+        add_score "encryption" 0 20 "Cannot verify encryption algorithm" "low"
+    fi
+}
+
+# Layer 2: Boot Security
+audit_boot() {
+    if ! $JSON_OUTPUT; then
+        echo ""
+        echo -e "${PURPLE}[LAYER 2: BOOT SECURITY]${NC}"
+        echo -e "${BLUE}Testing Secure Boot and UKI configuration...${NC}"
+    fi
+    
+    # Check EFI system
+    if [[ -d /sys/firmware/efi ]]; then
+        add_score "boot" 20 20 "EFI boot mode" "high"
+        
+        # Check Secure Boot
+        if command -v mokutil &>/dev/null; then
+            if mokutil --sb-state 2>/dev/null | grep -q "SecureBoot enabled"; then
+                add_score "boot" 30 30 "Secure Boot enabled" "critical"
+            else
+                add_score "boot" 0 30 "Secure Boot disabled" "critical"
+            fi
+        else
+            add_score "boot" 10 30 "mokutil not available - cannot verify Secure Boot" "medium"
+        fi
+        
+        # Check for UKI (Unified Kernel Image)
+        if [[ -d /efi/EFI/Linux ]] && find /efi/EFI/Linux -name "*.efi" | grep -q .; then
+            add_score "boot" 25 25 "Unified Kernel Image (UKI) detected" "high"
+        else
+            add_score "boot" 5 25 "No UKI detected - using traditional bootloader" "medium"
+        fi
+    else
+        add_score "boot" 0 20 "Legacy BIOS boot mode" "medium"
+        add_score "boot" 0 30 "Secure Boot not available in BIOS mode" "low"
+        add_score "boot" 10 25 "BIOS mode - UKI not applicable" "low"
+    fi
+    
+    # Check bootloader security
+    if command -v bootctl &>/dev/null; then
+        if bootctl status 2>/dev/null | grep -q "Secure Boot: enabled"; then
+            add_score "boot" 15 15 "systemd-boot Secure Boot verified" "high"
+        else
+            add_score "boot" 5 15 "systemd-boot present but Secure Boot status unknown" "medium"
+        fi
+    else
+        add_score "boot" 5 15 "bootctl not available" "low"
+    fi
+    
+    # Check for kernel hardening
+    if uname -r | grep -q "hardened"; then
+        add_score "boot" 10 10 "Hardened kernel in use" "high"
+    else
+        add_score "boot" 3 10 "Standard kernel (consider hardened)" "medium"
+    fi
+}
+
+# Layer 3: Network Security
+audit_network() {
+    if ! $JSON_OUTPUT; then
+        echo ""
+        echo -e "${PURPLE}[LAYER 3: NETWORK SECURITY]${NC}"
+        echo -e "${BLUE}Testing firewall and network hardening...${NC}"
+    fi
+    
+    # Check nftables
+    if command -v nft &>/dev/null; then
+        if nft list tables 2>/dev/null | grep -q "inet"; then
+            add_score "network" 20 20 "nftables firewall active" "critical"
+            
+            # Check default policy
+            if nft list chain inet filter input 2>/dev/null | grep -q "policy drop"; then
+                add_score "network" 20 20 "Default DROP policy configured" "critical"
+            else
+                add_score "network" 5 20 "Firewall active but default policy not DROP" "high"
+            fi
+            
+            # Check for Cloudflare-only rules
+            if nft list ruleset 2>/dev/null | grep -q "cloudflare\|173.245.48.0\|103.21.244.0"; then
+                add_score "network" 15 15 "Cloudflare-only rules detected" "high"
+            else
+                add_score "network" 5 15 "No Cloudflare restrictions found" "medium"
+            fi
+        else
+            add_score "network" 0 20 "nftables not configured" "critical"
+        fi
+    else
+        add_score "network" 0 20 "nftables not installed" "critical"
+    fi
+    
+    # Check network hardening sysctls
+    local sysctl_score=0
+    local sysctl_max=0
+    
+    # IP forwarding
+    if [[ $(sysctl -n net.ipv4.ip_forward 2>/dev/null) == "0" ]]; then
+        add_score "network" 5 5 "IP forwarding disabled" "medium"
+    else
+        add_score "network" 0 5 "IP forwarding enabled" "medium"
+    fi
+    
+    # Redirect protection
+    if [[ $(sysctl -n net.ipv4.conf.all.accept_redirects 2>/dev/null) == "0" ]]; then
+        add_score "network" 5 5 "ICMP redirects disabled" "medium"
+    else
+        add_score "network" 0 5 "ICMP redirects enabled" "medium"
+    fi
+    
+    # SYN cookies
+    if [[ $(sysctl -n net.ipv4.tcp_syncookies 2>/dev/null) == "1" ]]; then
+        add_score "network" 5 5 "SYN cookies enabled" "medium"
+    else
+        add_score "network" 0 5 "SYN cookies disabled" "medium"
+    fi
+    
+    # RP filter
+    if [[ $(sysctl -n net.ipv4.conf.all.rp_filter 2>/dev/null) == "1" ]]; then
+        add_score "network" 5 5 "Reverse path filtering enabled" "medium"
+    else
+        add_score "network" 0 5 "Reverse path filtering disabled" "medium"
+    fi
+    
+    # Check for unnecessary services
+    local dangerous_services=("telnet" "rsh" "rlogin" "ypbind")
+    for service in "${dangerous_services[@]}"; do
+        if systemctl is-active "$service" &>/dev/null; then
+            add_score "network" -5 5 "Dangerous service $service is running" "critical"
+        else
+            add_score "network" 5 5 "Dangerous service $service not running" "medium"
+        fi
+    done
+}
+
+# Layer 4: Access Control
+audit_access() {
+    if ! $JSON_OUTPUT; then
+        echo ""
+        echo -e "${PURPLE}[LAYER 4: ACCESS CONTROL]${NC}"
+        echo -e "${BLUE}Testing SSH, authentication and access controls...${NC}"
+    fi
+    
+    # SSH Configuration
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        # Root login
+        if grep -q "^PermitRootLogin.*no\|^PermitRootLogin.*prohibit-password" /etc/ssh/sshd_config; then
+            add_score "access" 20 20 "Root SSH login restricted" "critical"
+        elif grep -q "^PermitRootLogin.*yes" /etc/ssh/sshd_config; then
+            add_score "access" 0 20 "Root SSH login allowed" "critical"
+        else
+            add_score "access" 10 20 "Root SSH login setting unclear" "medium"
+        fi
+        
+        # Password authentication
+        if grep -q "^PasswordAuthentication.*no" /etc/ssh/sshd_config; then
+            add_score "access" 15 15 "SSH password authentication disabled" "high"
+        else
+            add_score "access" 5 15 "SSH password authentication enabled" "medium"
+        fi
+        
+        # Key authentication
+        if grep -q "^PubkeyAuthentication.*yes" /etc/ssh/sshd_config; then
+            add_score "access" 10 10 "SSH key authentication enabled" "high"
+        else
+            add_score "access" 0 10 "SSH key authentication not enabled" "medium"
+        fi
+        
+        # Protocol version
+        if grep -q "^Protocol.*2" /etc/ssh/sshd_config; then
+            add_score "access" 10 10 "SSH protocol 2 enforced" "medium"
+        else
+            add_score "access" 5 10 "SSH protocol not explicitly set to 2" "low"
+        fi
+        
+        # Max auth tries
+        if grep -q "^MaxAuthTries.*[1-3]" /etc/ssh/sshd_config; then
+            add_score "access" 10 10 "SSH authentication attempts limited" "medium"
+        else
+            add_score "access" 0 10 "SSH authentication attempts not limited" "medium"
+        fi
+    else
+        add_score "access" 0 65 "SSH configuration not found" "critical"
+    fi
+    
+    # Check for SSH keys
+    if [[ -d /home/admin/.ssh ]] && [[ -f /home/admin/.ssh/authorized_keys ]]; then
+        add_score "access" 15 15 "SSH keys configured for admin user" "high"
+    else
+        add_score "access" 0 15 "No SSH keys found for admin user" "medium"
+    fi
+    
+    # Check sudo configuration
+    if [[ -f /etc/sudoers ]]; then
+        if grep -q "admin.*ALL.*NOPASSWD" /etc/sudoers; then
+            add_score "access" 5 10 "Passwordless sudo configured" "medium"
+        elif grep -q "admin.*ALL" /etc/sudoers; then
+            add_score "access" 10 10 "Admin sudo privileges configured" "high"
+        else
+            add_score "access" 0 10 "No admin sudo configuration found" "medium"
+        fi
+    else
+        add_score "access" 0 10 "sudoers file not found" "medium"
+    fi
+    
+    # Check for fail2ban or similar
+    if systemctl is-active fail2ban &>/dev/null; then
+        add_score "access" 10 10 "fail2ban protection active" "high"
+    else
+        add_score "access" 0 10 "No brute force protection detected" "medium"
+    fi
+}
+
+# Layer 5: System Security
+audit_system() {
+    if ! $JSON_OUTPUT; then
+        echo ""
+        echo -e "${PURPLE}[LAYER 5: SYSTEM SECURITY]${NC}"
+        echo -e "${BLUE}Testing AppArmor, auditd and system hardening...${NC}"
+    fi
+    
+    # AppArmor
+    if command -v aa-status &>/dev/null; then
+        if systemctl is-active apparmor &>/dev/null; then
+            add_score "system" 20 20 "AppArmor service active" "high"
+            
+            # Check profiles
+            local loaded_profiles=$(aa-status 2>/dev/null | grep "profiles are loaded" | awk '{print $1}' || echo "0")
+            if [[ $loaded_profiles -gt 5 ]]; then
+                add_score "system" 10 10 "Multiple AppArmor profiles loaded ($loaded_profiles)" "high"
+            elif [[ $loaded_profiles -gt 0 ]]; then
+                add_score "system" 5 10 "Some AppArmor profiles loaded ($loaded_profiles)" "medium"
+            else
+                add_score "system" 0 10 "No AppArmor profiles loaded" "medium"
+            fi
+        else
+            add_score "system" 0 20 "AppArmor installed but not active" "medium"
+        fi
+    else
+        add_score "system" 0 30 "AppArmor not installed" "medium"
+    fi
+    
+    # Audit daemon
+    if systemctl is-active auditd &>/dev/null; then
+        add_score "system" 20 20 "Audit daemon active" "high"
+        
+        # Check audit rules
+        if [[ -s /etc/audit/rules.d/audit.rules ]]; then
+            add_score "system" 10 10 "Audit rules configured" "high"
+        else
+            add_score "system" 5 10 "Audit rules minimal" "medium"
+        fi
+    else
+        add_score "system" 0 20 "Audit daemon not active" "medium"
+    fi
+    
+    # System hardening checks
+    # Core dumps
+    if [[ $(sysctl -n kernel.core_pattern 2>/dev/null) == "|/bin/false" ]]; then
+        add_score "system" 10 10 "Core dumps disabled" "medium"
+    else
+        add_score "system" 0 10 "Core dumps not disabled" "medium"
+    fi
+    
+    # ASLR
+    if [[ -f /proc/sys/kernel/randomize_va_space ]]; then
+        local aslr=$(cat /proc/sys/kernel/randomize_va_space)
+        if [[ $aslr == "2" ]]; then
+            add_score "system" 10 10 "Full ASLR enabled" "high"
+        elif [[ $aslr == "1" ]]; then
+            add_score "system" 5 10 "Partial ASLR enabled" "medium"
+        else
+            add_score "system" 0 10 "ASLR disabled" "medium"
+        fi
+    else
+        add_score "system" 0 10 "Cannot verify ASLR status" "low"
+    fi
+    
+    # ExecShield/ NX bit
+    if [[ -f /proc/sys/kernel/exec-shield ]]; then
+        if [[ $(cat /proc/sys/kernel/exec-shield) == "1" ]]; then
+            add_score "system" 10 10 "ExecShield enabled" "medium"
+        else
+            add_score "system" 0 10 "ExecShield disabled" "medium"
+        fi
+    else
+        add_score "system" 5 10 "ExecShield not available (modern kernels use NX bit)" "low"
+    fi
+    
+    # Check for security updates
+    if command -v checkupdates &>/dev/null; then
+        local pending_updates=$(checkupdates 2>/dev/null | wc -l || echo "0")
+        if [[ $pending_updates -eq 0 ]]; then
+            add_score "system" 10 10 "System fully updated" "high"
+        elif [[ $pending_updates -lt 5 ]]; then
+            add_score "system" 5 10 "Few pending updates ($pending_updates)" "medium"
+        else
+            add_score "system" 0 10 "Many pending updates ($pending_updates)" "medium"
+        fi
+    else
+        add_score "system" 0 10 "Cannot check for updates" "low"
+    fi
+}
+
+# Layer 6: Recovery Security
+audit_recovery() {
+    if ! $JSON_OUTPUT; then
+        echo ""
+        echo -e "${PURPLE}[LAYER 6: RECOVERY SECURITY]${NC}"
+        echo -e "${BLUE}Testing Btrfs snapshots and backup systems...${NC}"
+    fi
+    
+    # Check Btrfs filesystem
+    if mount | grep -q "type btrfs"; then
+        add_score "recovery" 20 20 "Btrfs filesystem in use" "high"
+        
+        # Check for snapshots
+        if command -v snapper &>/dev/null; then
+            add_score "recovery" 15 15 "Snapper installed" "high"
+            
+            # Check snapshot count
+            local snapshot_count=$(snapper list 2>/dev/null | wc -l || echo "0")
+            if [[ $snapshot_count -gt 5 ]]; then
+                add_score "recovery" 15 15 "Multiple snapshots available ($snapshot_count)" "high"
+            elif [[ $snapshot_count -gt 0 ]]; then
+                add_score "recovery" 8 15 "Few snapshots available ($snapshot_count)" "medium"
+            else
+                add_score "recovery" 0 15 "No snapshots found" "medium"
+            fi
+            
+            # Check timeline
+            if systemctl is-active snapper-timeline.timer &>/dev/null; then
+                add_score "recovery" 10 10 "Automatic snapshot timeline active" "high"
+            else
+                add_score "recovery" 0 10 "Automatic snapshots not configured" "medium"
+            fi
+        else
+            add_score "recovery" 0 40 "Snapper not installed" "medium"
+        fi
+        
+        # Check for subvolume layout
+        if btrfs subvolume list / &>/dev/null | grep -q ".snapshots"; then
+            add_score "recovery" 10 10 "Snapshot subvolume configured" "medium"
+        else
+            add_score "recovery" 0 10 "No snapshot subvolume found" "medium"
+        fi
+    else
+        add_score "recovery" 0 20 "Not using Btrfs filesystem" "medium"
+        add_score "recovery" 0 50 "Snapshot functionality requires Btrfs" "low"
+    fi
+    
+    # Check for backup systems
+    if systemctl is-active rsyncd &>/dev/null || [[ -d /etc/backup ]]; then
+        add_score "recovery" 10 10 "Backup system detected" "medium"
+    else
+        add_score "recovery" 0 10 "No backup system detected" "medium"
+    fi
+    
+    # Check for system rescue tools
+    local rescue_tools=("chntpw" "testdisk" "photorec" "ddrescue")
+    local tools_found=0
+    for tool in "${rescue_tools[@]}"; do
+        if command -v "$tool" &>/dev/null; then
+            ((tools_found++))
+        fi
+    done
+    
+    if [[ $tools_found -gt 2 ]]; then
+        add_score "recovery" 10 10 "Multiple rescue tools available ($tools_found)" "low"
+    elif [[ $tools_found -gt 0 ]]; then
+        add_score "recovery" 5 10 "Some rescue tools available ($tools_found)" "low"
+    else
+        add_score "recovery" 0 10 "No rescue tools found" "low"
+    fi
+}
+
+# Generate detailed report
+generate_report() {
+    local overall_score=0
+    if [[ $MAX_SCORE -gt 0 ]]; then
+        overall_score=$(( (TOTAL_SCORE * 100) / MAX_SCORE ))
+    fi
+    
+    if $JSON_OUTPUT; then
+        generate_json_report "$overall_score"
+    else
+        generate_text_report "$overall_score"
+    fi
+}
+
+generate_text_report() {
+    local overall_score=$1
+    
+    {
+        echo "COMPREHENSIVE SECURITY AUDIT REPORT"
+        echo "===================================="
+        echo "Date: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "Hostname: $(hostname)"
+        echo "Kernel: $(uname -r)"
+        echo "Overall Score: $overall_score%"
+        echo ""
+        
+        echo "SECURITY LAYER BREAKDOWN"
+        echo "------------------------"
+        
+        for layer in encryption boot network access system recovery; do
+            local layer_score=${LAYER_SCORES[$layer]}
+            local layer_max=${LAYER_MAX_SCORES[$layer]}
+            local layer_percentage=0
+            if [[ $layer_max -gt 0 ]]; then
+                layer_percentage=$(( (layer_score * 100) / layer_max ))
+            fi
+            
+            local layer_name=""
+            case $layer in
+                encryption) layer_name="ENCRYPTION" ;;
+                boot) layer_name="BOOT SECURITY" ;;
+                network) layer_name="NETWORK SECURITY" ;;
+                access) layer_name="ACCESS CONTROL" ;;
+                system) layer_name="SYSTEM SECURITY" ;;
+                recovery) layer_name="RECOVERY SECURITY" ;;
+            esac
+            
+            printf "%-20s: %3d%% (%d/%d points)\n" "$layer_name" "$layer_percentage" "$layer_score" "$layer_max"
+        done
+        
+        echo ""
+        echo "DETAILED FINDINGS"
+        echo "-----------------"
+        
+        for finding in "${SECURITY_FINDINGS[@]}"; do
+            IFS='|' read -r layer points max_points description severity <<< "$finding"
+            
+            local status=""
+            if [[ $points -eq $max_points ]]; then
+                status="PASS"
+            elif [[ $points -gt 0 ]]; then
+                status="PARTIAL"
+            else
+                status="FAIL"
+            fi
+            
+            printf "[%s] %-8s: %s (%d/%d)\n" "$status" "$severity" "$description" "$points" "$max_points"
+        done
+        
+        echo ""
+        echo "SECURITY RECOMMENDATIONS"
+        echo "------------------------"
+        
+        # Generate recommendations based on failures
+        for finding in "${SECURITY_FINDINGS[@]}"; do
+            IFS='|' read -r layer points max_points description severity <<< "$finding"
+            
+            if [[ $points -eq 0 ]]; then
+                case $description in
+                    *"No LUKS encryption"*)
+                        echo "• Enable full disk encryption with LUKS2" ;;
+                    *"Secure Boot disabled"*)
+                        echo "• Enable Secure Boot in BIOS/UEFI settings" ;;
+                    *"nftables not configured"*)
+                        echo "• Configure nftables firewall with default DROP policy" ;;
+                    *"Root SSH login allowed"*)
+                        echo "• Disable root SSH login in /etc/ssh/sshd_config" ;;
+                    *"AppArmor not installed"*)
+                        echo "• Install and configure AppArmor for application security" ;;
+                    *"No snapshots found"*)
+                        echo "• Configure Snapper for Btrfs snapshot management" ;;
+                esac
+            fi
+        done
+        
+        echo ""
+        echo "NEXT STEPS"
+        echo "----------"
+        echo "1. Address all CRITICAL and HIGH severity findings"
+        echo "2. Re-run this audit after making changes"
+        echo "3. Schedule regular security audits (weekly recommended)"
+        echo "4. Monitor security logs continuously"
+        echo "5. Keep system updated regularly"
+        
+    } | tee "$REPORT_FILE"
+}
+
+generate_json_report() {
+    local overall_score=$1
+    
+    # Build JSON structure
+    local json="{"
+    json+='"timestamp":"'$(date -Iseconds)'",'
+    json+='"hostname":"'$(hostname)'",'
+    json+='"kernel":"'$(uname -r)'",'
+    json+='"overall_score":'$overall_score','
+    json+='"total_points":'$TOTAL_SCORE','
+    json+='"max_points":'$MAX_SCORE','
+    
+    json+='"layers":{'
+    local first_layer=true
+    for layer in encryption boot network access system recovery; do
+        if ! $first_layer; then json+=","; fi
+        first_layer=false
+        
+        local layer_score=${LAYER_SCORES[$layer]}
+        local layer_max=${LAYER_MAX_SCORES[$layer]}
+        local layer_percentage=0
+        if [[ $layer_max -gt 0 ]]; then
+            layer_percentage=$(( (layer_score * 100) / layer_max ))
+        fi
+        
+        json+='"'$layer'":{'
+        json+='"score":'$layer_percentage','
+        json+='"points":'$layer_score','
+        json+='"max_points":'$layer_max
+        json+='}'
+    done
+    json+='},'
+    
+    json+='"findings":['
+    local first_finding=true
+    for finding in "${SECURITY_FINDINGS[@]}"; do
+        if ! $first_finding; then json+=","; fi
+        first_finding=false
+        
+        IFS='|' read -r layer points max_points description severity <<< "$finding"
+        
+        local status="fail"
+        if [[ $points -eq $max_points ]]; then
+            status="pass"
+        elif [[ $points -gt 0 ]]; then
+            status="partial"
+        fi
+        
+        json+='{'
+        json+='"layer":"'$layer'",'
+        json+='"status":"'$status'",'
+        json+='"severity":"'$severity'",'
+        json+='"description":"'$description'",'
+        json+='"points":'$points','
+        json+='"max_points":'$max_points
+        json+='}'
+    done
+    json+=']'
+    
+    json+='}'
+    
+    echo "$json" | tee "$REPORT_FILE"
+}
+
+# Main execution
+main() {
+    init_scoring
+    print_header
+    
+    audit_encryption
+    audit_boot
+    audit_network
+    audit_access
+    audit_system
+    audit_recovery
+    
+    generate_report
+    
+    if ! $JSON_OUTPUT; then
+        echo ""
+        echo -e "${GREEN}Security audit complete!${NC}"
+        echo -e "${CYAN}Report saved to:${NC} $REPORT_FILE"
+        echo ""
+        
+        # Show summary
+        if [[ $MAX_SCORE -gt 0 ]]; then
+            local final_score=$(( (TOTAL_SCORE * 100) / MAX_SCORE ))
+            echo -e "Overall Security Score: ${WHITE}$final_score%${NC}"
+            
+            if [[ $final_score -ge 90 ]]; then
+                echo -e "${GREEN}✓ EXCELLENT security posture${NC}"
+            elif [[ $final_score -ge 75 ]]; then
+                echo -e "${YELLOW}⚠ GOOD security posture with room for improvement${NC}"
+            elif [[ $final_score -ge 60 ]]; then
+                echo -e "${YELLOW}⚠ MODERATE security posture - improvements needed${NC}"
+            else
+                echo -e "${RED}✗ POOR security posture - immediate attention required${NC}"
+            fi
+        fi
+    fi
+    
+    exit 0
+}
+
+# Run main function
+main "$@"

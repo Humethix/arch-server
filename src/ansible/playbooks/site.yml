@@ -68,6 +68,17 @@
         var: health.stdout_lines
       when: health.stdout_lines is defined
     
+    - name: Run comprehensive security audit
+      command: /usr/local/bin/security-audit --verbose
+      register: security_audit
+      failed_when: false
+      changed_when: false
+    
+    - name: Display security audit summary
+      debug:
+        msg: "Security audit completed - detailed report saved to /tmp/security-audit-*.txt"
+      when: security_audit.rc is defined
+    
     - name: Deployment complete
       debug:
         msg:
@@ -82,6 +93,7 @@
           - "    • Caddy Web Server: systemctl status caddy"
           - "    • Firewall: systemctl status nftables"
           - "    • Snapshots: snapper list"
+          - "    • Security Audit: /usr/local/bin/security-audit"
           - ""
           - "  Access:"
           - "    • Local: http://{{ ansible_facts['default_ipv4']['address'] | default('localhost') }}"
@@ -89,5 +101,6 @@
           - ""
           - "  Next Steps:"
           - "    1. Setup Cloudflare: /root/arch/scripts/setup-cloudflare.sh"
-          - "    2. Verify: /usr/local/bin/health-check"
+          - "    2. Security Audit: /usr/local/bin/security-audit"
+          - "    3. Verify: /usr/local/bin/health-check"
           - ""
