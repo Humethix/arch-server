@@ -378,6 +378,13 @@ if [[ -f "${SCRIPT_DIR}/hardware-detect.sh" ]]; then
     
     # Optimize storage partitioning based on disk size
     local storage_gb=${HW_storage_total_gb:-100}
+    
+    # Validate that storage_gb is a number
+    if [[ ! "$storage_gb" =~ ^[0-9]+$ ]]; then
+        warn "Invalid storage size detected: $storage_gb, using fallback"
+        storage_gb=100
+    fi
+    
     if [[ $storage_gb -ge 1000 ]]; then
         # Large disks - increase EFI partition for UKIs
         EFI_SIZE_MB=2048
