@@ -81,6 +81,12 @@ add_score() {
     local description="$4"
     local severity="${5:-info}"
     
+    # Validate inputs
+    if [[ ! "$points" =~ ^-?[0-9]+$ ]]; then points=0; fi
+    if [[ ! "$max_points" =~ ^-?[0-9]+$ ]]; then max_points=0; fi
+    if [[ -z "$description" ]]; then description="Unknown test"; fi
+    if [[ -z "$severity" ]]; then severity="info"; fi
+    
     LAYER_SCORES[$layer]=$((LAYER_SCORES[$layer] + points))
     TOTAL_SCORE=$((TOTAL_SCORE + points))
     MAX_SCORE=$((MAX_SCORE + max_points))
@@ -110,7 +116,7 @@ print_header() {
         echo "╚════════════════════════════════════════════════════════════════╝"
         echo ""
         echo -e "${CYAN}Audit Date:${NC} $(date '+%Y-%m-%d %H:%M:%S')"
-        echo -e "${CYAN}Hostname:${NC} $(hostname)"
+        echo -e "${CYAN}Hostname:${NC} $(cat /proc/sys/kernel/hostname 2>/dev/null || echo 'Unknown')"
         echo -e "${CYAN}Kernel:${NC} $(uname -r)"
         echo ""
     fi
@@ -570,7 +576,7 @@ generate_text_report() {
         echo "COMPREHENSIVE SECURITY AUDIT REPORT"
         echo "===================================="
         echo "Date: $(date '+%Y-%m-%d %H:%M:%S')"
-        echo "Hostname: $(hostname)"
+        echo "Hostname: $(cat /proc/sys/kernel/hostname 2>/dev/null || echo 'Unknown')"
         echo "Kernel: $(uname -r)"
         echo "Overall Score: $overall_score%"
         echo ""
@@ -615,6 +621,10 @@ generate_text_report() {
                 status="FAIL"
             fi
             
+            # Ensure we have valid numbers
+            if [[ ! "$points" =~ ^[0-9-]+$ ]]; then points=0; fi
+            if [[ ! "$max_points" =~ ^[0-9-]+$ ]]; then max_points=0; fi
+            
             printf "[%s] %-8s: %s (%d/%d)\n" "$status" "$severity" "$description" "$points" "$max_points"
         done
         
@@ -625,6 +635,15 @@ generate_text_report() {
         # Generate recommendations based on failures
         for finding in "${SECURITY_FINDINGS[@]}"; do
             IFS='|' read -r layer points max_points description severity <<< "$finding"
+            
+            # Skip empty findings
+            if [[ -z "$layer" || -z "$description" ]]; then
+                continue
+            fi
+            
+            # Validate numbers
+            if [[ ! "$points" =~ ^-?[0-9]+$ ]]; then points=0; fi
+            if [[ ! "$max_points" =~ ^-?[0-9]+$ ]]; then max_points=0; fi
             
             if [[ $points -eq 0 ]]; then
                 case $description in
@@ -662,7 +681,7 @@ generate_json_report() {
     # Build JSON structure
     local json="{"
     json+='"timestamp":"'$(date -Iseconds)'",'
-    json+='"hostname":"'$(hostname)'",'
+    json+='"hostname":"'$(cat /proc/sys/kernel/hostname 2>/dev/null || echo 'Unknown')'",'
     json+='"kernel":"'$(uname -r)'",'
     json+='"overall_score":'$overall_score','
     json+='"total_points":'$TOTAL_SCORE','
@@ -696,6 +715,15 @@ generate_json_report() {
         first_finding=false
         
         IFS='|' read -r layer points max_points description severity <<< "$finding"
+        
+        # Skip empty findings
+        if [[ -z "$layer" || -z "$description" ]]; then
+            continue
+        fi
+        
+        # Validate numbers
+        if [[ ! "$points" =~ ^-?[0-9]+$ ]]; then points=0; fi
+        if [[ ! "$max_points" =~ ^-?[0-9]+$ ]]; then max_points=0; fi
         
         local status="fail"
         if [[ $points -eq $max_points ]]; then
