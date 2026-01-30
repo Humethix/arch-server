@@ -73,6 +73,13 @@
   failed_when: false
   changed_when: false
 
+- name: Load AppArmor kernel module
+  modprobe:
+    name: apparmor
+    state: present
+  register: apparmor_module
+  failed_when: false
+
 - name: Enable and start AppArmor service
   systemd:
     name: apparmor
@@ -80,6 +87,7 @@
     state: started
   register: apparmor_service
   failed_when: false
+  when: apparmor_module is succeeded
 
 - name: Check if apparmor.service exists (alternative name)
   systemd:
@@ -238,12 +246,6 @@
   copy:
     src: health-check
     dest: /usr/local/bin/health-check
-    mode: '0755'
-
-- name: Install comprehensive security audit script
-  copy:
-    src: security-audit
-    dest: /usr/local/bin/security-audit
     mode: '0755'
 
 - name: Apply VirtualBox optimizations (if detected)
