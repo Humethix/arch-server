@@ -1,0 +1,23 @@
+[Unit]
+Description=Immich Photo Service (Humethix)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=immich
+Group=immich
+WorkingDirectory=/etc/humethix/immich
+
+# Start containers
+ExecStart=/usr/bin/podman-compose -f /etc/humethix/immich/docker-compose.yml up -d
+
+# Stop containers
+ExecStop=/usr/bin/podman-compose -f /etc/humethix/immich/docker-compose.yml down
+
+# Get status
+ExecStatus=/usr/bin/podman-compose -f /etc/humethix/immich/docker-compose.yml ps
+
+[Install]
+WantedBy=multi-user.target

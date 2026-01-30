@@ -1,0 +1,23 @@
+[Unit]
+Description=Seafile File Service (Humethix)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=seafile
+Group=seafile
+WorkingDirectory=/etc/humethix/seafile
+
+# Start containers
+ExecStart=/usr/bin/podman-compose -f /etc/humethix/seafile/docker-compose.yml up -d
+
+# Stop containers
+ExecStop=/usr/bin/podman-compose -f /etc/humethix/seafile/docker-compose.yml down
+
+# Get status
+ExecStatus=/usr/bin/podman-compose -f /etc/humethix/seafile/docker-compose.yml ps
+
+[Install]
+WantedBy=multi-user.target

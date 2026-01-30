@@ -1,0 +1,36 @@
+[Unit]
+Description=Uptime Kuma Service (Humethix)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=uptime-kuma
+Group=uptime-kuma
+WorkingDirectory=/home/uptime-kuma
+
+# Podman rootless container
+ExecStart=/usr/bin/podman run \
+    --name uptime-kuma \
+    --rm \
+    --network slirp4netns:port_handler=slirp4netns \
+    -p 127.0.0.1:${PORT}:${CONTAINER_PORT} \
+    -v /mnt/data/uptime-kuma:/app/data:Z \
+    --memory ${MEMORY_LIMIT} \
+    --cpus ${CPU_LIMIT} \
+    -e UPTIME_KUMA_PORT=${CONTAINER_PORT} \
+    ${IMAGE}:${IMAGE_VERSION}
+
+ExecStop=/usr/bin/podman stop -t 30 uptime-kuma
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/mnt/data/uptime-kuma
+
+[Install]
+WantedBy=multi-user.target

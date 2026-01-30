@@ -169,6 +169,10 @@
     dest: /usr/local/bin/security-audit
     mode: '0755'
 
+- name: Apply VirtualBox optimizations (if detected)
+  include_tasks: virtualbox-optimizations.yml
+  when: ansible_facts['virtualization_type'] == 'oracle'
+
 - name: Base hardening complete
   debug:
     msg: "✓ Base hardening applied successfully"

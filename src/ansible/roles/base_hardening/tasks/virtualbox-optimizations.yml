@@ -1,0 +1,214 @@
+---
+# VirtualBox Optimizations for Arch Linux v5.1
+# Applied only when running in VirtualBox environment
+
+- name: Check if running in VirtualBox
+  command: cat /sys/class/dmi/id/product_name
+  register: virtualbox_product
+  changed_when: false
+  failed_when: false
+
+- name: Set VirtualBox fact
+  set_fact:
+    is_virtualbox: "{{ 'VirtualBox' in virtualbox_product.stdout }}"
+  when: virtualbox_product.stdout is defined
+
+- name: Display VirtualBox detection status
+  debug:
+    msg: "VirtualBox detection: {{ 'DETECTED' if is_virtualbox else 'NOT DETECTED' }}"
+
+- name: Create VirtualBox sysctl configuration
+  copy:
+    dest: /etc/sysctl.d/99-virtualbox.conf
+    content: |
+      # VirtualBox Optimizations
+      # Reduce dirty page writeback for better performance in VM
+      vm.dirty_background_ratio = 5
+      vm.dirty_ratio = 10
+      vm.dirty_writeback_centisecs = 500
+      vm.dirty_expire_centisecs = 3000
+
+      # Optimize I/O scheduler for virtual environments
+      # Deadline scheduler is generally best for VMs
+      echo deadline > /sys/block/sda/queue/scheduler 2>/dev/null || true
+
+      # Reduce swap usage (VMs have limited I/O)
+      vm.swappiness = 10
+
+      # Optimize networking for VM
+      net.core.rmem_max = 16777216
+      net.core.wmem_max = 16777216
+      net.ipv4.tcp_rmem = 4096 65536 16777216
+      net.ipv4.tcp_wmem = 4096 65536 16777216
+  when: is_virtualbox
+
+- name: Apply VirtualBox sysctl settings
+  sysctl:
+    name: "{{ item }}"
+    state: present
+    reload: yes
+  loop:
+      - vm.dirty_background_ratio
+      - vm.dirty_ratio
+      - vm.dirty_writeback_centisecs
+      - vm.dirty_expire_centisecs
+      - vm.swappiness
+      - net.core.rmem_max
+      - net.core.wmem_max
+      - net.ipv4.tcp_rmem
+      - net.ipv4.tcp_wmem
+  when: is_virtualbox
+
+- name: Optimize systemd journal for VirtualBox
+  lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: '^#?SystemMaxUse='
+    line: 'SystemMaxUse=100M'
+  when: is_virtualbox
+
+- name: Optimize systemd journal runtime for VirtualBox
+  lineinfile:
+    path: /etc/systemd/journald.conf
+    regexp: '^#?RuntimeMaxUse='
+    line: 'RuntimeMaxUse=50M'
+  when: is_virtualbox
+
+- name: Create VirtualBox systemd configuration
+  copy:
+    dest: /etc/systemd/system.conf.d/virtualbox.conf
+    content: |
+      # VirtualBox Optimizations
+      DefaultTimeoutStartSec=30s
+      DefaultTimeoutStopSec=30s
+  when: is_virtualbox
+
+- name: Optimize pacman for VirtualBox
+  lineinfile:
+    path: /etc/pacman.conf
+    line: "{{ item }}"
+    create: yes
+  loop:
+      - '# VirtualBox Optimizations'
+      - '# Use parallel downloads for faster package installation'
+      - 'ParallelDownloads = 5'
+      - '# Disable download timeout for potentially slow VM network'
+      - 'DownloadTimeout = 120'
+  when: is_virtualbox
+
+- name: Create VirtualBox performance monitor
+  copy:
+    dest: /usr/local/bin/virtualbox-performance
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # VirtualBox Performance Monitor
+      
+      echo "=== VirtualBox Performance Monitor ==="
+      echo "Time: $(date)"
+      echo ""
+      
+      # CPU Usage
+      echo "CPU Usage:"
+      top -bn1 | grep "Cpu(s)" | awk '{print "  CPU Usage: " 100 - $5 "%"}'
+      echo ""
+      
+      # Memory Usage
+      echo "Memory Usage:"
+      free -h | grep -E "^(Mem|Swap)" | awk '{print "  " $1 ": " $3 "/" $2 " (" int($3/$2*100) "%)"}'
+      echo ""
+      
+      # Disk I/O
+      echo "Disk I/O:"
+      iostat -x 1 1 | tail -n +4 | awk 'NR==1 {print "  " $0} NR>1 {print "  " $0}'
+      echo ""
+      
+      # VirtualBox Specific
+      echo "VirtualBox Info:"
+      if command -v VBoxManage &>/dev/null; then
+          echo "  Guest Additions: $(VBoxManage list vms 2>/dev/null | head -1 | grep -o 'Guest Additions.*' || echo 'Not detected')"
+      fi
+      echo ""
+  when: is_virtualbox
+
+- name: Create VirtualBox troubleshooting guide
+  copy:
+    dest: /usr/local/bin/virtualbox-troubleshoot
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # VirtualBox Troubleshooting Guide
+      
+      echo "=== VirtualBox Troubleshooting Guide ==="
+      echo ""
+      
+      echo "Common VirtualBox Issues and Solutions:"
+      echo ""
+      
+      echo "1. SLOW PERFORMANCE:"
+      echo "   - Ensure Guest Additions are installed"
+      echo "   - Enable 3D acceleration in VM settings"
+      echo "   - Increase video memory to 128MB or more"
+      echo "   - Enable I/O APIC in VM settings"
+      echo "   - Use paravirtualized I/O (PVH) if available"
+      echo ""
+      
+      echo "2. NETWORK ISSUES:"
+      echo "   - Use Bridged Adapter for external access"
+      echo "   - Or use NAT with Port Forwarding"
+      echo "   - Check VirtualBox network settings"
+      echo "   - Restart network services: systemctl restart NetworkManager"
+      echo ""
+      
+      echo "3. DISPLAY ISSUES:"
+      echo "   - Install Guest Additions for better graphics"
+      echo "   - Enable 3D acceleration"
+      echo "   - Increase video memory"
+      echo "   - Check display settings in VM"
+      echo ""
+      
+      echo "4. STORAGE ISSUES:"
+      echo "   - Use SATA controller instead of IDE"
+      echo "   - Enable host I/O cache if needed"
+      echo "   - Check disk space: df -h"
+      echo "   - Optimize disk usage: pacman -Scc"
+      echo ""
+      
+      echo "5. AUDIO ISSUES:"
+      echo "   - Enable audio controller in VM settings"
+      echo "   - Select proper audio driver (PulseAudio or ALSA)"
+      echo "   - Check audio services: systemctl status pulseaudio"
+      echo ""
+      
+      echo "6. SHARED FOLDER ISSUES:"
+      echo "   - Install Guest Additions for auto-mounting"
+      echo "   - Check mount points: mount | grep vboxsf"
+      echo "   - Manual mount: sudo mount -t vboxsf sharename /mount/point"
+      echo ""
+      
+      echo "7. TIME SYNC ISSUES:"
+      echo "   - Enable time sync in VM settings"
+      echo "   - Or use: timedatectl set-ntp true"
+      echo "   - Check time: timedatectl status"
+      echo ""
+      
+      echo "VirtualBox Version:"
+      VBoxManage --version 2>/dev/null || echo "VBoxManage not available"
+      echo ""
+      
+      echo "System Information:"
+      echo "  Kernel: $(uname -r)"
+      echo "  Memory: $(free -h | grep '^Mem:' | awk '{print $2}')"
+      echo "  Disk: $(df -h / | tail -1 | awk '{print $2}')"
+      echo ""
+  when: is_virtualbox
+
+- name: Display VirtualBox optimization summary
+  debug:
+    msg: |
+      VirtualBox optimizations applied:
+      - Kernel parameters tuned for VM performance
+      - Systemd journal size optimized
+      - Pacman parallel downloads enabled
+      - Performance monitoring tools installed
+      - Troubleshooting guide created
+  when: is_virtualbox

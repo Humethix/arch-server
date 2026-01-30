@@ -255,6 +255,135 @@ EFI_SIZE_MB="${EFI_SIZE_MB:-1024}"
 BTRFS_COMPRESSION="${BTRFS_COMPRESSION:-zstd:3}"
 KERNEL_TYPE="${KERNEL_TYPE:-hardened}"
 
+# ============================================================================ 
+# INTELLIGENT HARDWARE DETECTION AND OPTIMIZATION
+# ============================================================================
+
+# Source hardware detection module
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/hardware-detect.sh" ]]; then
+    source "${SCRIPT_DIR}/hardware-detect.sh"
+    
+    # Run hardware detection
+    log "Running intelligent hardware detection..."
+    detect_cpu
+    detect_memory
+    detect_storage
+    detect_gpu
+    detect_network
+    detect_virtualization
+    detect_tpm
+    detect_secure_boot
+    generate_optimization_profile
+    
+    # Apply hardware-based optimizations
+    log "Applying hardware-based optimizations..."
+    
+    # Optimize Btrfs compression based on storage type
+    case "${HW_storage_tier}" in
+        "nvme")
+            # NVMe can handle higher compression
+            BTRFS_COMPRESSION="zstd:5"
+            info "NVMe storage detected - using high compression: $BTRFS_COMPRESSION"
+            ;;
+        "ssd")
+            # SSD optimized compression
+            BTRFS_COMPRESSION="zstd:3"
+            info "SSD storage detected - using balanced compression: $BTRFS_COMPRESSION"
+            ;;
+        "hdd")
+            # HDD optimized compression (less CPU intensive)
+            BTRFS_COMPRESSION="lzo"
+            info "HDD storage detected - using lightweight compression: $BTRFS_COMPRESSION"
+            ;;
+    esac
+    
+    # Optimize kernel based on CPU
+    case "${HW_cpu_optimization}" in
+        "intel-avx2"|"amd-avx2")
+            # Modern CPUs can handle hardened kernel
+            KERNEL_TYPE="hardened"
+            info "Modern CPU with AVX2 detected - using hardened kernel: $KERNEL_TYPE"
+            ;;
+        "intel"|"amd")
+            # Check if we should use LTS kernel for older systems
+            if [[ "${HW_memory_tier}" == "minimal" ]]; then
+                KERNEL_TYPE="lts"
+                info "Older CPU with minimal memory detected - using LTS kernel: $KERNEL_TYPE"
+            else
+                KERNEL_TYPE="hardened"
+                info "Standard CPU detected - using hardened kernel: $KERNEL_TYPE"
+            fi
+            ;;
+    esac
+    
+    # Optimize package selection based on memory
+    case "${HW_memory_tier}" in
+        "high")
+            # High memory systems can handle more packages
+            INSTALL_CONTAINERS="true"
+            info "High memory system detected - enabling container runtime"
+            ;;
+        "medium")
+            # Medium memory systems - containers optional but recommended
+            if [[ "$INSTALL_CONTAINERS" == "" ]]; then
+                INSTALL_CONTAINERS="true"
+                info "Medium memory system detected - enabling container runtime"
+            fi
+            ;;
+        "low"|"minimal")
+            # Low memory systems - disable containers by default
+            if [[ "$INSTALL_CONTAINERS" == "" ]]; then
+                INSTALL_CONTAINERS="false"
+                info "Low memory system detected - disabling container runtime for stability"
+            fi
+            ;;
+    esac
+    
+    # Optimize based on virtualization
+    if [[ "${HW_is_bare_metal}" == "true" ]]; then
+        # Bare metal - enable all security features
+        if [[ "$ENABLE_SECURE_BOOT" == "" ]]; then
+            ENABLE_SECURE_BOOT="true"
+            info "Bare metal system detected - enabling Secure Boot"
+        fi
+        if [[ "$ENABLE_TPM_UNLOCK" == "" ]]; then
+            ENABLE_TPM_UNLOCK="true"
+            info "Bare metal system detected - enabling TPM auto-unlock"
+        fi
+    else
+        # Virtual environment - adjust settings
+        if [[ "${HW_virtualization_type}" == "oracle" ]]; then
+            # VirtualBox specific optimizations
+            if [[ "$ENABLE_TPM_UNLOCK" == "true" ]] && [[ "${HW_tpm_available}" == "false" ]]; then
+                ENABLE_TPM_UNLOCK="false"
+                warning "VirtualBox detected but TPM not available - disabling TPM auto-unlock"
+            fi
+            if [[ "$ENABLE_SECURE_BOOT" == "true" ]]; then
+                warning "VirtualBox detected - Secure Boot has limited support in virtualization"
+            fi
+        fi
+    fi
+    
+    # Optimize storage partitioning based on disk size
+    local storage_gb=${HW_storage_total_gb}
+    if [[ $storage_gb -ge 1000 ]]; then
+        # Large disks - increase EFI partition for UKIs
+        EFI_SIZE_MB=2048
+        info "Large storage device detected (${storage_gb}GB) - increasing EFI partition to ${EFI_SIZE_MB}MB"
+    elif [[ $storage_gb -lt 100 ]]; then
+        # Small disks - reduce EFI partition
+        EFI_SIZE_MB=512
+        info "Small storage device detected (${storage_gb}GB) - reducing EFI partition to ${EFI_SIZE_MB}MB"
+    fi
+    
+    log "Hardware-based optimizations applied"
+    log "Optimization profile: ${HW_optimization_profile}"
+    log "Optimization level: ${HW_optimization_level}"
+else
+    warn "Hardware detection module not found - using default optimizations"
+fi
+
 # Detect virtualization environment
 VIRT_TYPE="none"
 if command -v systemd-detect-virt &>/dev/null; then
