@@ -377,7 +377,7 @@ if [[ -f "${SCRIPT_DIR}/hardware-detect.sh" ]]; then
     fi
     
     # Optimize storage partitioning based on disk size
-    local storage_gb=${HW_storage_total_gb:-100}
+    storage_gb=${HW_storage_total_gb:-100}
     
     # Validate that storage_gb is a number
     if [[ ! "$storage_gb" =~ ^[0-9]+$ ]]; then
