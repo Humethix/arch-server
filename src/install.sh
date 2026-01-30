@@ -967,7 +967,7 @@ find_ssh_key() {
     # If not found, look for common SSH keys in ~/.ssh/
     local key_type key_path
     for key_type in ed25519 rsa ecdsa; do
-        key_path="$HOME/.ssh/id_${key_type}.pub"
+        key_path="${HOME:-/root}/.ssh/id_${key_type}.pub"
         if [[ -f "$key_path" ]]; then
             if validate_ssh_key "$key_path"; then
                 info "Found SSH key in ~/.ssh/: $key_path"
@@ -1239,7 +1239,7 @@ UKIEOF
 mkdir -p /mnt/efi/EFI/Linux
 
 # Get LUKS UUID
-LUKS_UUID=$(blkid -s UUID -o value "$LUKS_PART")
+LUKS_UUID=$(blkid -s UUID -o value "$LUKS_PART" 2>/dev/null || echo "unknown")
 
 # Kernel command line
 CMDLINE="rd.luks.name=${LUKS_UUID}=cryptroot root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet loglevel=3 systemd.show_status=auto rd.udev.log_level=3"
@@ -1751,7 +1751,7 @@ echo "  • Bootloader: systemd-boot + UKI"
 echo "  • Filesystem: Btrfs (${BTRFS_COMPRESSION})"
 echo "  • Encryption: LUKS2 (Argon2id)"
 echo ""
-if [[ -f "$SSH_KEY_FILE" ]]; then
+if [[ -f "${SSH_KEY_FILE:-}" ]]; then
     echo "SSH Access:"
     echo "  • SSH Key Auth: ENABLED"
     echo "  • Command: ssh $USERNAME@SERVER_IP"
