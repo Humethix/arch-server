@@ -95,38 +95,6 @@ if [[ -f "${SCRIPT_DIR}/../../src/hardware-detect.sh" ]]; then
     if [[ $cpu_cores -ge 4 ]]; then
         # High-end CPU
         SERVER_CPU_LIMIT=${SERVER_CPU_LIMIT:-"2.0"}
-        THUMBNAIL_CONCURRENCY=${THUMBNAIL_CONCURRENCY:-"4"}
-        log "High-end CPU detected (${cpu_cores} cores) - optimized for parallel processing"
-    elif [[ $cpu_cores -ge 2 ]]; then
-        # Medium CPU
-        SERVER_CPU_LIMIT=${SERVER_CPU_LIMIT:-"1.5"}
-        THUMBNAIL_CONCURRENCY=${THUMBNAIL_CONCURRENCY:-"2"}
-        log "Medium CPU detected (${cpu_cores} cores) - using balanced CPU settings"
-    else
-        # Low-end CPU
-        SERVER_CPU_LIMIT=${SERVER_CPU_LIMIT:-"1.0"}
-        THUMBNAIL_CONCURRENCY=${THUMBNAIL_CONCURRENCY:-"1"}
-        log "Low-end CPU detected (${cpu_cores} cores) - using conservative CPU settings"
-    fi
-    
-    # Optimize based on storage type
-    if [[ "${HW_storage_tier}" == "nvme" ]]; then
-        log "NVMe storage detected - optimizing for high I/O workloads"
-        # Can handle more concurrent operations
-        THUMBNAIL_CONCURRENCY=$((THUMBNAIL_CONCURRENCY + 1))
-    elif [[ "${HW_storage_tier}" == "hdd" ]]; then
-        log "HDD storage detected - optimizing for lower I/O impact"
-        # Reduce concurrent operations to avoid I/O bottleneck
-        THUMBNAIL_CONCURRENCY=1
-        MAX_FILE_SIZE="50"
-    fi
-    
-    log "Hardware-optimized Immich configuration applied"
-else
-    warn "Hardware detection not available - using default Immich configuration"
-fi
-
-# -----------------------------------------------------------------------------
 # Helper functions
 # -----------------------------------------------------------------------------
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
@@ -195,10 +163,8 @@ setup_storage() {
         if ! blkid "$STORAGE_DEVICE" &>/dev/null; then
             log "Opretter ny partitionstabel..."
             wipefs -a "$STORAGE_DEVICE"
-            sfdisk "$STORAGE_DEVICE" << EOF
-label: gpt
-size: , type=LINUX
-EOF
+            echo "label: gpt" | sfdisk "$STORAGE_DEVICE"
+            echo ", type=LINUX" | sfdisk "$STORAGE_DEVICE" --append
             partprobe "$STORAGE_DEVICE"
             # Vent på at device er klar
             sleep 2
