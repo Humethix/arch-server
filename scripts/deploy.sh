@@ -100,6 +100,11 @@ log ""
 log "Phase 1: Checking prerequisites..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Fix locale issues
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export LANGUAGE=C.UTF-8
+
 # Check for ansible
 if ! command -v ansible-playbook &>/dev/null; then
     log "Installing Ansible..."
@@ -126,6 +131,74 @@ echo ""
 # Run with more verbose output and error capture
 if ansible-playbook playbooks/site.yml -v; then
     log "✓ Ansible deployment complete"
+    
+    # Wait for services to settle
+    log "Waiting for services to settle..."
+    sleep 5
+    
+    # Verify services after successful deployment
+    log ""
+    log "Phase 3: Verifying services..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if systemctl is-active caddy &>/dev/null; then
+        log "✓ Caddy service is running"
+    else
+        warn "⚠ Caddy service is not running"
+        info "Caddy service status:"
+        systemctl status caddy --no-pager -l || true
+        echo ""
+        
+        # Try to recover Caddy
+        if recover_service "caddy" "Caddy web server"; then
+            log "✓ Caddy recovery successful"
+        else
+            info "Caddy journal logs:"
+            journalctl -u caddy --no-pager -n 10 || true
+            echo ""
+        fi
+    fi
+    
+    # nftables is a oneshot service - check if rules are loaded instead
+    if nft list ruleset 2>/dev/null | grep -q "table"; then
+        log "✓ Firewall rules are loaded"
+    else
+        warn "⚠ Firewall rules not loaded"
+        info "nftables status:"
+        systemctl status nftables --no-pager -l || true
+        echo ""
+        
+        # Try to recover nftables
+        if systemctl restart nftables 2>/dev/null; then
+            log "✓ nftables service restarted successfully"
+        else
+            warn "⚠ Failed to load nftables rules"
+            info "nftables journal logs:"
+            journalctl -u nftables --no-pager -n 10 || true
+            echo ""
+        fi
+    fi
+    
+    # Check apparmor (service name might be apparmor or apparmor.service)
+    if systemctl is-active apparmor &>/dev/null || systemctl is-active apparmor.service &>/dev/null; then
+        log "✓ AppArmor service is running"
+    else
+        warn "⚠ apparmor service is not running"
+        info "AppArmor status:"
+        systemctl status apparmor --no-pager -l || systemctl status apparmor.service --no-pager -l || true
+        echo ""
+        
+        # Try to recover apparmor
+        if systemctl restart apparmor 2>/dev/null || systemctl restart apparmor.service 2>/dev/null; then
+            log "✓ AppArmor service restarted successfully"
+        else
+            warn "⚠ Could not recover AppArmor service automatically"
+            info "AppArmor journal logs:"
+            journalctl -u apparmor --no-pager -n 10 || journalctl -u apparmor.service --no-pager -n 10 || true
+            echo ""
+        fi
+    fi
+    
 else
     warn "Ansible had some issues - checking what failed"
     

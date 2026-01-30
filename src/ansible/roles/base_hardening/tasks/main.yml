@@ -17,6 +17,83 @@
       - lynis
     state: present
 
+- name: Enable and start nftables service
+  systemd:
+    name: nftables
+    enabled: yes
+    state: started
+  register: nftables_service
+  failed_when: false
+
+- name: Create basic nftables rules
+  copy:
+    dest: /etc/nftables.conf
+    mode: '0644'
+    content: |
+      #!/usr/sbin/nft -f
+      # Basic firewall rules for Arch Linux v5.1
+      
+      table inet filter {
+        chain input {
+          type filter hook input priority 0; policy drop;
+          
+          # Allow established/related connections
+          ct state established,related accept
+          
+          # Allow loopback
+          iif "lo" accept
+          
+          # Allow SSH
+          tcp dport 22 accept
+          
+          # Allow HTTP/HTTPS
+          tcp dport {80, 443} accept
+          
+          # Allow ping
+          icmp type echo-request accept
+          ip6 nexthdr icmpv6 icmpv6 type echo-request accept
+          
+          # Drop invalid packets
+          ct state invalid drop
+        }
+        
+        chain forward {
+          type filter hook forward priority 0; policy drop;
+        }
+        
+        chain output {
+          type filter hook output priority 0; policy accept;
+        }
+      }
+  notify: restart nftables
+
+- name: Load nftables rules
+  command: nft -f /etc/nftables.conf
+  register: nftables_load
+  failed_when: false
+  changed_when: false
+
+- name: Enable and start AppArmor service
+  systemd:
+    name: apparmor
+    enabled: yes
+    state: started
+  register: apparmor_service
+  failed_when: false
+
+- name: Check if apparmor.service exists (alternative name)
+  systemd:
+    name: apparmor.service
+    enabled: yes
+    state: started
+  register: apparmor_service_alt
+  failed_when: false
+  when: apparmor_service.failed is defined
+
+- name: Note about AppArmor service
+  debug:
+    msg: "AppArmor service {{ 'started successfully' if apparmor_service is succeeded or apparmor_service_alt is succeeded else 'failed to start' }}"
+
 - name: Check if linux-hardened is installed
   command: pacman -Q linux-hardened
   register: hardened_check
