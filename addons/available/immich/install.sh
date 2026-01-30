@@ -329,6 +329,8 @@ services:
       - JWT_SECRET=${jwt_secret}
       - ENABLE_MACHINE_LEARNING=${ENABLE_MACHINE_LEARNING}
       - MACHINE_LEARNING_URL=http://immich-machine-learning:3003
+      - DISABLE_SIGNUP=${DISABLE_SIGNUP:-"false"}
+      - REQUIRE_DEVICE_AUTH=${REQUIRE_DEVICE_AUTH:-"false"}
     ports:
       - 127.0.0.1:${WEB_PORT}:3001
       - 127.0.0.1:${MICROSERVICES_PORT}:3002
@@ -365,6 +367,139 @@ services:
 EOF
 
     chown "$SERVICE_USER:$SERVICE_USER" "${CONFIG_DIR}/docker-compose.yml"
+}
+
+setup_backblaze_sync() {
+    if [[ "${ENABLE_BACKBLAZE_SYNC:-false}" != "true" ]]; then
+        log "Backblaze synkronisering er deaktiveret"
+        return 0
+    fi
+    
+    log "Opsætning af Backblaze B2 synkronisering..."
+    
+    # Valider Backblaze konfiguration
+    if [[ -z "${B2_APPLICATION_KEY_ID:-}" || -z "${B2_APPLICATION_KEY:-}" ]]; then
+        error "B2_APPLICATION_KEY_ID og B2_APPLICATION_KEY skal være sat i config.env"
+    fi
+    
+    if [[ -z "${B2_BUCKET_NAME:-}" ]]; then
+        error "B2_BUCKET_NAME skal være sat i config.env"
+    fi
+    
+    # Installer rclone
+    if ! command -v rclone &>/dev/null; then
+        log "Installerer rclone..."
+        pacman -S --noconfirm rclone
+    fi
+    
+    # Opret rclone konfiguration
+    mkdir -p "/home/${SERVICE_USER}/.config/rclone"
+    cat > "/home/${SERVICE_USER}/.config/rclone/rclone.conf" << EOF
+[backblaze_immich]
+type = b2
+account = ${B2_APPLICATION_KEY_ID}
+key = ${B2_APPLICATION_KEY}
+EOF
+    
+    chown -R "${SERVICE_USER}:${SERVICE_USER}" "/home/${SERVICE_USER}/.config/rclone"
+    chmod 600 "/home/${SERVICE_USER}/.config/rclone/rclone.conf"
+    
+    # Opret synkroniseringsscript
+    cat > "${CONFIG_DIR}/sync-backblaze.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/config.env"
+
+LOG_FILE="/var/log/immich-backblaze-sync.log"
+LIBRARY_DIR="/mnt/immich-storage/library"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+# Synkroniseringsfunktion
+sync_to_backblaze() {
+    log "Starter synkronisering til Backblaze..."
+    
+    # Build include/exclude flags
+    include_flags=""
+    IFS=',' read -ra INCLUDES <<< "$SYNC_INCLUDE"
+    for pattern in "${INCLUDES[@]}"; do
+        include_flags+=" --include '${pattern// /}'"
+    done
+    
+    exclude_flags=""
+    IFS=',' read -ra EXCLUDES <<< "$SYNC_EXCLUDE"
+    for pattern in "${EXCLUDES[@]}"; do
+        exclude_flags+=" --exclude '${pattern// /}'"
+    done
+    
+    # Kør synkronisering
+    if [[ "$SYNC_DIRECTION" == "upload" ]]; then
+        log "Uploader filer til Backblaze..."
+        rclone sync "$LIBRARY_DIR" "backblaze_immich:${B2_BUCKET_NAME}" \
+            $include_flags $exclude_flags \
+            --progress --stats-one-line --log-file="$LOG_FILE" \
+            ${SYNC_DELETE:+--delete-during}
+    else
+        log "Downloader filer fra Backblaze..."
+        rclone sync "backblaze_immich:${B2_BUCKET_NAME}" "$LIBRARY_DIR" \
+            $include_flags $exclude_flags \
+            --progress --stats-one-line --log-file="$LOG_FILE" \
+            ${SYNC_DELETE:+--delete-during}
+    fi
+    
+    log "Synkronisering fuldført"
+}
+
+sync_to_backblaze
+EOF
+    
+    chmod +x "${CONFIG_DIR}/sync-backblaze.sh"
+    chown "${SERVICE_USER}:${SERVICE_USER}" "${CONFIG_DIR}/sync-backblaze.sh"
+    
+    # Opret systemd timer til automatisk synkronisering
+    cat > "/etc/systemd/system/immich-backblaze-sync.service" << EOF
+[Unit]
+Description=Immich Backblaze Sync
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=${SERVICE_USER}
+ExecStart=${CONFIG_DIR}/sync-backblaze.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    cat > "/etc/systemd/system/immich-backblaze-sync.timer" << EOF
+[Unit]
+Description=Run Immich Backblaze sync periodically
+Requires=immich-backblaze-sync.service
+
+[Timer]
+OnCalendar=*:0/${SYNC_INTERVAL}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    
+    # Reload systemd og enable timer
+    systemctl daemon-reload
+    systemctl enable immich-backblaze-sync.timer
+    systemctl start immich-backblaze-sync.timer
+    
+    log "✓ Backblaze B2 synkronisering konfigureret"
+    log "  - Bucket: ${B2_BUCKET_NAME}"
+    log "  - Direction: ${SYNC_DIRECTION}"
+    log "  - Interval: ${SYNC_INTERVAL} sekunder"
+    log "  - Sync timer enabled"
 }
 
 install_systemd_service() {
@@ -468,6 +603,19 @@ show_storage_info() {
         echo "Directory Sizes:"
         du -sh "$LIBRARY_DIR" "$UPLOAD_DIR" "$THUMBNAIL_DIR" "$PROFILE_DIR" 2>/dev/null || echo "Directories not yet created"
     fi
+    
+    # Vis Backblaze synkronisering status
+    if [[ "${ENABLE_BACKBLAZE_SYNC:-false}" == "true" ]]; then
+        echo ""
+        echo "BACKBLAZE B2 SYNKRONISERING:"
+        echo "  Status: $(systemctl is-active immich-backblaze-sync.timer 2>/dev/null || echo "inactive")"
+        echo "  Bucket: ${B2_BUCKET_NAME}"
+        echo "  Direction: ${SYNC_DIRECTION}"
+        echo "  Interval: ${SYNC_INTERVAL} sekunder"
+        echo "  Next sync: $(systemctl list-timers immich-backblaze-sync --no-pager | tail -n1 | awk '{print $5, $6, $7}' 2>/dev/null || echo "unknown")"
+        echo "  Log: /var/log/immich-backblaze-sync.log"
+    fi
+    
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 }
@@ -487,6 +635,7 @@ main() {
     install_containers
     create_docker_compose
     install_systemd_service
+    setup_backblaze_sync
     register_backup
     register_tunnel
     start_service
