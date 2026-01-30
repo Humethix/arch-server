@@ -45,6 +45,9 @@ if [[ -f "${SCRIPT_DIR}/../../src/hardware-detect.sh" ]]; then
     detect_cpu
     detect_memory
     
+    # Export hardware info for use in this script
+    export_hardware_info
+    
     log "Applying hardware-based optimizations for Immich..."
     
     # Optimize memory limits based on available memory

@@ -276,6 +276,9 @@ if [[ -f "${SCRIPT_DIR}/hardware-detect.sh" ]]; then
     detect_secure_boot
     generate_optimization_profile
     
+    # Export hardware info for use in this script
+    export_hardware_info
+    
     # Apply hardware-based optimizations
     log "Applying hardware-based optimizations..."
     

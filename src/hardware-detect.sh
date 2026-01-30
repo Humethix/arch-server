@@ -140,7 +140,7 @@ detect_storage() {
     HARDWARE_INFO[storage_ssd_count]="$ssd_count"
     HARDWARE_INFO[storage_hdd_count]="$hdd_count"
     HARDWARE_INFO[storage_nvme_count]="$nvme_count"
-    HARDWARE_INFO[storage_devices]=$(printf '%s\n' "${storage_devices[@]}")
+    HARDWARE_INFO[storage_devices]=$(printf '%s\n' "${storage_devices[@]}" 2>/dev/null || echo "")
     
     # Storage-specific optimizations
     if [[ $nvme_count -gt 0 ]]; then
@@ -186,7 +186,7 @@ detect_gpu() {
     fi
     
     HARDWARE_INFO[gpu_count]="$gpu_count"
-    HARDWARE_INFO[gpu_devices]=$(printf '%s\n' "${gpu_devices[@]}")
+    HARDWARE_INFO[gpu_devices]=$(printf '%s\n' "${gpu_devices[@]}" 2>/dev/null || echo "")
     HARDWARE_INFO[gpu_integrated]="$integrated_gpu"
     
     # GPU-specific optimizations
@@ -218,7 +218,7 @@ detect_network() {
     done < <(ls /sys/class/net/ | grep -v lo)
     
     HARDWARE_INFO[network_count]="$interface_count"
-    HARDWARE_INFO[network_interfaces]=$(printf '%s\n' "${network_interfaces[@]}")
+    HARDWARE_INFO[network_interfaces]=$(printf '%s\n' "${network_interfaces[@]}" 2>/dev/null || echo "")
     
     # Network-specific optimizations
     if [[ $interface_count -gt 1 ]]; then
@@ -493,7 +493,7 @@ generate_hardware_report() {
     "optimization": {
         "profile": "${HARDWARE_INFO[optimization_profile]}",
         "level": "${HARDWARE_INFO[optimization_level]}",
-        "recommendations": $(printf '%s\n' "${HARDWARE_INFO[recommendations]}" | jq -R . | jq -s .)
+        "recommendations": $(printf '%s\n' "${HARDWARE_INFO[recommendations]}" 2>/dev/null | jq -R . | jq -s . 2>/dev/null || echo '[]')
     }
 }
 EOF
@@ -560,7 +560,7 @@ main() {
     echo "  Level: ${HARDWARE_INFO[optimization_level]}"
     echo ""
     echo -e "${CYAN}RECOMMENDATIONS:${NC}"
-    printf '%s\n' "${HARDWARE_INFO[recommendations]}" | sed 's/^/  • /'
+    printf '%s\n' "${HARDWARE_INFO[recommendations]}" 2>/dev/null | sed 's/^/  • /'
     echo ""
     echo -e "${GREEN}Report saved to: ${HARDWARE_INFO[report_file]}${NC}"
     echo ""

@@ -18,6 +18,9 @@ if [[ -f "${ADDONS_DIR}/../src/hardware-detect.sh" ]]; then
     detect_storage
     detect_cpu
     generate_optimization_profile
+    
+    # Export hardware info for use in this script
+    export_hardware_info
 fi
 
 # Colors

@@ -34,6 +34,86 @@ else
     exit 1
 fi
 
+# ============================================================================ 
+# HARDWARE-BASED OPTIMIZATION
+# ============================================================================
+
+# Source hardware detection if available
+if [[ -f "${SCRIPT_DIR}/../../src/hardware-detect.sh" ]]; then
+    source "${SCRIPT_DIR}/../../src/hardware-detect.sh"
+    
+    # Run hardware detection for optimization
+    detect_cpu
+    detect_memory
+    
+    # Export hardware info for use in this script
+    export_hardware_info
+    
+    log "Applying hardware-based optimizations for Seafile..."
+    
+    # Optimize memory limits based on available memory
+    local available_memory_gb=${HW_memory_available_gb}
+    if [[ $available_memory_gb -ge 16 ]]; then
+        # High-end system
+        SERVER_MEMORY_LIMIT=${SERVER_MEMORY_LIMIT:-"2g"}
+        DB_MEMORY_LIMIT=${DB_MEMORY_LIMIT:-"1g"}
+        REDIS_MEMORY_LIMIT=${REDIS_MEMORY_LIMIT:-"512m"}
+        MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-"500"}
+        log "High-end memory system detected (${available_memory_gb}GB) - using high-performance settings"
+    elif [[ $available_memory_gb -ge 8 ]]; then
+        # Medium system
+        SERVER_MEMORY_LIMIT=${SERVER_MEMORY_LIMIT:-"1g"}
+        DB_MEMORY_LIMIT=${DB_MEMORY_LIMIT:-"512m"}
+        REDIS_MEMORY_LIMIT=${REDIS_MEMORY_LIMIT:-"256m"}
+        MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-"200"}
+        log "Medium memory system detected (${available_memory_gb}GB) - using balanced settings"
+    else
+        # Low-end system
+        SERVER_MEMORY_LIMIT=${SERVER_MEMORY_LIMIT:-"512m"}
+        DB_MEMORY_LIMIT=${DB_MEMORY_LIMIT:-"256m"}
+        REDIS_MEMORY_LIMIT=${REDIS_MEMORY_LIMIT:-"128m"}
+        MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-"100"}
+        log "Low memory system detected (${available_memory_gb}GB) - using lightweight settings"
+    fi
+    
+    # Optimize CPU settings based on available cores
+    local cpu_cores=${HW_cpu_cores}
+    if [[ $cpu_cores -ge 4 ]]; then
+        # High-end CPU
+        SERVER_CPU_LIMIT=${SERVER_CPU_LIMIT:-"2.0"}
+        DB_CPU_LIMIT=${DB_CPU_LIMIT:-"1.5"}
+        log "High-end CPU detected (${cpu_cores} cores) - optimized for parallel processing"
+    elif [[ $cpu_cores -ge 2 ]]; then
+        # Medium CPU
+        SERVER_CPU_LIMIT=${SERVER_CPU_LIMIT:-"1.5"}
+        DB_CPU_LIMIT=${DB_CPU_LIMIT:-"1.0"}
+        log "Medium CPU detected (${cpu_cores} cores) - using balanced CPU settings"
+    else
+        # Low-end CPU
+        SERVER_CPU_LIMIT=${SERVER_CPU_LIMIT:-"1.0"}
+        DB_CPU_LIMIT=${DB_CPU_LIMIT:-"0.5"}
+        log "Low-end CPU detected (${cpu_cores} cores) - using conservative CPU settings"
+    fi
+    
+    # Optimize based on storage type
+    if [[ "${HW_storage_tier}" == "nvme" ]]; then
+        log "NVMe storage detected - optimizing for high I/O workloads"
+        # Can handle more concurrent operations
+        MAX_CONCURRENT_UPLOADS=${MAX_CONCURRENT_UPLOADS:-"10"}
+    elif [[ "${HW_storage_tier}" == "hdd" ]]; then
+        log "HDD storage detected - optimizing for lower I/O impact"
+        # Reduce concurrent operations to avoid I/O bottleneck
+        MAX_CONCURRENT_UPLOADS=${MAX_CONCURRENT_UPLOADS:-"2"}
+        MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-"50"}
+    else
+        MAX_CONCURRENT_UPLOADS=${MAX_CONCURRENT_UPLOADS:-"5"}
+    fi
+    
+    log "Hardware-optimized Seafile configuration applied"
+else
+    warn "Hardware detection not available - using default Seafile configuration"
+fi
+
 # -----------------------------------------------------------------------------
 # Helper functions
 # -----------------------------------------------------------------------------
