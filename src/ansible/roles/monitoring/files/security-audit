@@ -87,6 +87,11 @@ add_score() {
     if [[ -z "$description" ]]; then description="Unknown test"; fi
     if [[ -z "$severity" ]]; then severity="info"; fi
     
+    # Initialize layer score if not exists
+    if [[ -z "${LAYER_SCORES[$layer]:-}" ]]; then
+        LAYER_SCORES[$layer]=0
+    fi
+    
     LAYER_SCORES[$layer]=$((LAYER_SCORES[$layer] + points))
     TOTAL_SCORE=$((TOTAL_SCORE + points))
     MAX_SCORE=$((MAX_SCORE + max_points))
@@ -585,8 +590,8 @@ generate_text_report() {
         echo "------------------------"
         
         for layer in encryption boot network access system recovery; do
-            local layer_score=${LAYER_SCORES[$layer]}
-            local layer_max=${LAYER_MAX_SCORES[$layer]}
+            local layer_score=${LAYER_SCORES[$layer]:-0}
+            local layer_max=${LAYER_MAX_SCORES[$layer]:-100}
             local layer_percentage=0
             if [[ $layer_max -gt 0 ]]; then
                 layer_percentage=$(( (layer_score * 100) / layer_max ))
@@ -609,8 +614,13 @@ generate_text_report() {
         echo "DETAILED FINDINGS"
         echo "-----------------"
         
-        for finding in "${SECURITY_FINDINGS[@]}"; do
+        for finding in "${SECURITY_FINDINGS[@]:-}"; do
             IFS='|' read -r layer points max_points description severity <<< "$finding"
+            
+            # Skip empty findings
+            if [[ -z "$finding" ]]; then
+                continue
+            fi
             
             local status=""
             if [[ $points -eq $max_points ]]; then
@@ -633,8 +643,13 @@ generate_text_report() {
         echo "------------------------"
         
         # Generate recommendations based on failures
-        for finding in "${SECURITY_FINDINGS[@]}"; do
+        for finding in "${SECURITY_FINDINGS[@]:-}"; do
             IFS='|' read -r layer points max_points description severity <<< "$finding"
+            
+            # Skip empty findings
+            if [[ -z "$finding" ]]; then
+                continue
+            fi
             
             # Skip empty findings
             if [[ -z "$layer" || -z "$description" ]]; then
@@ -693,8 +708,8 @@ generate_json_report() {
         if ! $first_layer; then json+=","; fi
         first_layer=false
         
-        local layer_score=${LAYER_SCORES[$layer]}
-        local layer_max=${LAYER_MAX_SCORES[$layer]}
+        local layer_score=${LAYER_SCORES[$layer]:-0}
+        local layer_max=${LAYER_MAX_SCORES[$layer]:-100}
         local layer_percentage=0
         if [[ $layer_max -gt 0 ]]; then
             layer_percentage=$(( (layer_score * 100) / layer_max ))
@@ -710,9 +725,14 @@ generate_json_report() {
     
     json+='"findings":['
     local first_finding=true
-    for finding in "${SECURITY_FINDINGS[@]}"; do
+    for finding in "${SECURITY_FINDINGS[@]:-}"; do
         if ! $first_finding; then json+=","; fi
         first_finding=false
+        
+        # Skip empty findings
+        if [[ -z "$finding" ]]; then
+            continue
+        fi
         
         IFS='|' read -r layer points max_points description severity <<< "$finding"
         
