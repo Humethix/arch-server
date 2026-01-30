@@ -283,7 +283,7 @@ if [[ -f "${SCRIPT_DIR}/hardware-detect.sh" ]]; then
     log "Applying hardware-based optimizations..."
     
     # Optimize Btrfs compression based on storage type
-    case "${HW_storage_tier}" in
+    case "${HW_storage_tier:-"ssd"}" in
         "nvme")
             # NVMe can handle higher compression
             BTRFS_COMPRESSION="zstd:5"
@@ -295,22 +295,27 @@ if [[ -f "${SCRIPT_DIR}/hardware-detect.sh" ]]; then
             info "SSD storage detected - using balanced compression: $BTRFS_COMPRESSION"
             ;;
         "hdd")
-            # HDD optimized compression (less CPU intensive)
+            # HDD optimized compression
             BTRFS_COMPRESSION="lzo"
             info "HDD storage detected - using lightweight compression: $BTRFS_COMPRESSION"
+            ;;
+        *)
+            # Default compression
+            BTRFS_COMPRESSION="zstd:3"
+            info "Using default compression: $BTRFS_COMPRESSION"
             ;;
     esac
     
     # Optimize kernel based on CPU
-    case "${HW_cpu_optimization}" in
+    case "${HW_cpu_optimization:-"none"}" in
         "intel-avx2"|"amd-avx2")
             # Modern CPUs can handle hardened kernel
             KERNEL_TYPE="hardened"
-            info "Modern CPU with AVX2 detected - using hardened kernel: $KERNEL_TYPE"
+            info "Modern CPU detected - using hardened kernel: $KERNEL_TYPE"
             ;;
         "intel"|"amd")
             # Check if we should use LTS kernel for older systems
-            if [[ "${HW_memory_tier}" == "minimal" ]]; then
+            if [[ "${HW_memory_tier:-"medium"}" == "minimal" ]]; then
                 KERNEL_TYPE="lts"
                 info "Older CPU with minimal memory detected - using LTS kernel: $KERNEL_TYPE"
             else
@@ -318,58 +323,61 @@ if [[ -f "${SCRIPT_DIR}/hardware-detect.sh" ]]; then
                 info "Standard CPU detected - using hardened kernel: $KERNEL_TYPE"
             fi
             ;;
+        *)
+            # Unknown CPU - use LTS for safety
+            KERNEL_TYPE="lts"
+            info "Unknown CPU detected - using LTS kernel for compatibility: $KERNEL_TYPE"
+            ;;
     esac
     
     # Optimize package selection based on memory
-    case "${HW_memory_tier}" in
+    case "${HW_memory_tier:-"medium"}" in
         "high")
             # High memory systems can handle more packages
             INSTALL_CONTAINERS="true"
-            info "High memory system detected - enabling container runtime"
+            info "High memory system detected - enabling container packages"
             ;;
         "medium")
-            # Medium memory systems - containers optional but recommended
-            if [[ "$INSTALL_CONTAINERS" == "" ]]; then
-                INSTALL_CONTAINERS="true"
-                info "Medium memory system detected - enabling container runtime"
-            fi
+            # Medium memory systems - balanced approach
+            INSTALL_CONTAINERS="true"
+            info "Medium memory system detected - enabling selected container packages"
             ;;
         "low"|"minimal")
-            # Low memory systems - disable containers by default
-            if [[ "$INSTALL_CONTAINERS" == "" ]]; then
-                INSTALL_CONTAINERS="false"
-                info "Low memory system detected - disabling container runtime for stability"
-            fi
+            # Low memory systems - minimal packages only
+            INSTALL_CONTAINERS="false"
+            info "Low memory system detected - using minimal package set"
+            ;;
+        *)
+            # Unknown memory tier - be conservative
+            INSTALL_CONTAINERS="false"
+            info "Unknown memory tier detected - using minimal package set"
             ;;
     esac
     
     # Optimize based on virtualization
-    if [[ "${HW_is_bare_metal}" == "true" ]]; then
+    if [[ "${HW_is_bare_metal:-"true"}" == "true" ]]; then
         # Bare metal - enable all security features
         if [[ "$ENABLE_SECURE_BOOT" == "" ]]; then
             ENABLE_SECURE_BOOT="true"
-            info "Bare metal system detected - enabling Secure Boot"
         fi
         if [[ "$ENABLE_TPM_UNLOCK" == "" ]]; then
             ENABLE_TPM_UNLOCK="true"
-            info "Bare metal system detected - enabling TPM auto-unlock"
         fi
+        info "Bare metal system detected - enabling all security features"
     else
         # Virtual environment - adjust settings
-        if [[ "${HW_virtualization_type}" == "oracle" ]]; then
+        if [[ "${HW_virtualization_type:-"none"}" == "oracle" ]]; then
             # VirtualBox specific optimizations
-            if [[ "$ENABLE_TPM_UNLOCK" == "true" ]] && [[ "${HW_tpm_available}" == "false" ]]; then
+            if [[ "$ENABLE_TPM_UNLOCK" == "true" ]] && [[ "${HW_tpm_available:-"false"}" == "false" ]]; then
                 ENABLE_TPM_UNLOCK="false"
                 warning "VirtualBox detected but TPM not available - disabling TPM auto-unlock"
             fi
-            if [[ "$ENABLE_SECURE_BOOT" == "true" ]]; then
-                warning "VirtualBox detected - Secure Boot has limited support in virtualization"
-            fi
+            info "VirtualBox detected - applying virtualization optimizations"
         fi
     fi
     
     # Optimize storage partitioning based on disk size
-    local storage_gb=${HW_storage_total_gb}
+    local storage_gb=${HW_storage_total_gb:-100}
     if [[ $storage_gb -ge 1000 ]]; then
         # Large disks - increase EFI partition for UKIs
         EFI_SIZE_MB=2048
@@ -381,8 +389,8 @@ if [[ -f "${SCRIPT_DIR}/hardware-detect.sh" ]]; then
     fi
     
     log "Hardware-based optimizations applied"
-    log "Optimization profile: ${HW_optimization_profile}"
-    log "Optimization level: ${HW_optimization_level}"
+    log "Optimization profile: ${HW_optimization_profile:-"balanced"}"
+    log "Optimization level: ${HW_optimization_level:-"medium"}"
 else
     warn "Hardware detection module not found - using default optimizations"
 fi
