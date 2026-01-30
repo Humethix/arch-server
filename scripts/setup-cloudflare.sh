@@ -83,7 +83,9 @@ log "✓ Logged in successfully"
 log ""
 log "Step 3: Creating tunnel..."
 
-TUNNEL_NAME="archserver-$(hostname)"
+# Get hostname with fallbacks
+HOSTNAME=$(hostname 2>/dev/null || cat /proc/sys/kernel/hostname 2>/dev/null || echo "archserver")
+TUNNEL_NAME="archserver-${HOSTNAME}"
 
 # Check if tunnel exists
 if cloudflared tunnel list | grep -q "$TUNNEL_NAME"; then
