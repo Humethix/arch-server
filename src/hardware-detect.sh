@@ -32,12 +32,21 @@ info() { echo -e "${BLUE}[HW_DETECT]${NC} $*"; }
 detect_cpu() {
     log "Detecting CPU information..."
     
-    local cpu_model=$(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
-    local cpu_cores=$(nproc)
-    local cpu_threads=$(grep -c '^processor' /proc/cpuinfo)
-    local cpu_mhz=$(lscpu | grep 'CPU MHz' | awk '{print $3}' || echo "Unknown")
-    local cpu_vendor=$(grep 'vendor_id' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
-    local cpu_flags=$(grep 'flags' /proc/cpuinfo | head -1 | cut -d: -f2- | xargs)
+    local cpu_model=$(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs 2>/dev/null || echo "Unknown CPU")
+    local cpu_cores=$(nproc 2>/dev/null || echo "1")
+    local cpu_threads=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo "1")
+    local cpu_mhz=$(lscpu | grep 'CPU MHz' | awk '{print $3}' 2>/dev/null || echo "Unknown")
+    local cpu_vendor=$(grep 'vendor_id' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs 2>/dev/null || echo "Unknown")
+    local cpu_flags=$(grep 'flags' /proc/cpuinfo | head -1 | cut -d: -f2- | xargs 2>/dev/null || echo "")
+    
+    # Validate numeric values
+    if [[ ! "$cpu_cores" =~ ^[0-9]+$ ]] || [[ "$cpu_cores" -eq 0 ]]; then
+        cpu_cores=1
+    fi
+    
+    if [[ ! "$cpu_threads" =~ ^[0-9]+$ ]] || [[ "$cpu_threads" -eq 0 ]]; then
+        cpu_threads=$cpu_cores
+    fi
     
     HARDWARE_INFO[cpu_model]="$cpu_model"
     HARDWARE_INFO[cpu_cores]="$cpu_cores"
@@ -71,8 +80,20 @@ detect_cpu() {
 detect_memory() {
     log "Detecting memory information..."
     
-    local total_mem=$(free -b | grep '^Mem:' | awk '{print $2}')
-    local available_mem=$(free -b | grep '^Mem:' | awk '{print $7}')
+    local total_mem=$(free -b | grep '^Mem:' | awk '{print $2}' 2>/dev/null || echo "0")
+    local available_mem=$(free -b | grep '^Mem:' | awk '{print $7}' 2>/dev/null || echo "0")
+    
+    # Validate that we got valid numbers
+    if [[ ! "$total_mem" =~ ^[0-9]+$ ]] || [[ "$total_mem" -eq 0 ]]; then
+        warn "Could not detect total memory, using fallback"
+        total_mem=8589934592  # 8GB fallback
+    fi
+    
+    if [[ ! "$available_mem" =~ ^[0-9]+$ ]] || [[ "$available_mem" -eq 0 ]]; then
+        warn "Could not detect available memory, using fallback"
+        available_mem=$((total_mem / 2))  # 50% of total as fallback
+    fi
+    
     local total_mem_gb=$((total_mem / 1024 / 1024 / 1024))
     local available_mem_gb=$((available_mem / 1024 / 1024 / 1024))
     
@@ -113,6 +134,12 @@ detect_storage() {
         if [[ -b "$device" ]]; then
             local device_name=$(basename "$device")
             local device_size=$(lsblk -b -n -o SIZE "$device" 2>/dev/null || echo "0")
+            
+            # Validate device size is numeric
+            if [[ ! "$device_size" =~ ^[0-9]+$ ]] || [[ "$device_size" -eq 0 ]]; then
+                continue
+            fi
+            
             local device_size_gb=$((device_size / 1024 / 1024 / 1024))
             local device_rotational=$(lsblk -d -n -o RO "$device" 2>/dev/null || echo "1")
             local device_model=$(lsblk -d -n -o MODEL "$device" 2>/dev/null || echo "Unknown")
@@ -134,7 +161,7 @@ detect_storage() {
                 ((hdd_count++))
             fi
         fi
-    done < <(lsblk -d -n -o NAME | grep -E '^(sd|nvme|vd)')
+    done < <(lsblk -d -n -o NAME 2>/dev/null | grep -E '^(sd|nvme|vd)' || echo "")
     
     HARDWARE_INFO[storage_total_gb]="$total_storage_gb"
     HARDWARE_INFO[storage_ssd_count]="$ssd_count"
@@ -215,7 +242,7 @@ detect_network() {
             local interface_mac=$(ip link show "$interface" | grep -o 'ether [^ ]*' | awk '{print $2}' || echo "Unknown")
             network_interfaces+=("$interface:${interface_speed}:${interface_mac}")
         fi
-    done < <(ls /sys/class/net/ | grep -v lo)
+    done < <(ls /sys/class/net/ 2>/dev/null | grep -v lo || echo "")
     
     HARDWARE_INFO[network_count]="$interface_count"
     HARDWARE_INFO[network_interfaces]=$(printf '%s\n' "${network_interfaces[@]}" 2>/dev/null || echo "")
@@ -251,7 +278,7 @@ detect_virtualization() {
             virt_type="openvz"
         elif [[ -f /proc/xen ]]; then
             virt_type="xen"
-        elif [[ -d /proc/self/status ]] && grep -q "hypervisor" /proc/self/status; then
+        elif [[ -d /proc/self/status ]] && grep -q "hypervisor" /proc/self/status 2>/dev/null; then
             virt_type="hypervisor"
         fi
     fi
@@ -407,11 +434,15 @@ generate_optimization_profile() {
     local optimization_level=""
     local recommendations=()
     
+    # Get hardware info with fallbacks
+    local memory_tier="${HARDWARE_INFO[memory_tier]:-"medium"}"
+    local storage_tier="${HARDWARE_INFO[storage_tier]:-"ssd"}"
+    
     # Determine optimization level based on hardware
-    if [[ "${HARDWARE_INFO[memory_tier]}" == "high" ]] && [[ "${HARDWARE_INFO[storage_tier]}" == "nvme" ]]; then
+    if [[ "$memory_tier" == "high" ]] && [[ "$storage_tier" == "nvme" ]]; then
         optimization_level="performance"
         profile_name="high-performance"
-    elif [[ "${HARDWARE_INFO[memory_tier]}" == "medium" ]] && [[ "${HARDWARE_INFO[storage_tier]}" =~ ^(ssd|nvme)$ ]]; then
+    elif [[ "$memory_tier" == "medium" ]] && [[ "$storage_tier" =~ ^(ssd|nvme)$ ]]; then
         optimization_level="balanced"
         profile_name="balanced"
     else
@@ -426,7 +457,7 @@ generate_optimization_profile() {
     
     HARDWARE_INFO[optimization_profile]="$profile_name"
     HARDWARE_INFO[optimization_level]="$optimization_level"
-    HARDWARE_INFO[recommendations]=$(printf '%s\n' "${recommendations[@]}")
+    HARDWARE_INFO[recommendations]=$(printf '%s\n' "${recommendations[@]}" 2>/dev/null || echo "")
     
     log "Optimization profile: $profile_name ($optimization_level)"
 }
@@ -439,60 +470,60 @@ generate_hardware_report() {
     cat > "$report_file" << EOF
 {
     "timestamp": "$(date -Iseconds)",
-    "hostname": "$(hostname)",
+    "hostname": "$(hostname 2>/dev/null || echo "unknown")",
     "hardware": {
         "cpu": {
-            "model": "${HARDWARE_INFO[cpu_model]}",
-            "vendor": "${HARDWARE_INFO[cpu_vendor]}",
-            "cores": ${HARDWARE_INFO[cpu_cores]},
-            "threads": ${HARDWARE_INFO[cpu_threads]},
-            "mhz": "${HARDWARE_INFO[cpu_mhz]}",
-            "optimization": "${HARDWARE_INFO[cpu_optimization]}"
+            "model": "${HARDWARE_INFO[cpu_model]:-"Unknown CPU"}",
+            "vendor": "${HARDWARE_INFO[cpu_vendor]:-"Unknown"}",
+            "cores": ${HARDWARE_INFO[cpu_cores]:-"1"},
+            "threads": ${HARDWARE_INFO[cpu_threads]:-"1"},
+            "mhz": "${HARDWARE_INFO[cpu_mhz]:-"Unknown"}",
+            "optimization": "${HARDWARE_INFO[cpu_optimization]:-"none"}"
         },
         "memory": {
-            "total_gb": ${HARDWARE_INFO[memory_total_gb]},
-            "available_gb": ${HARDWARE_INFO[memory_available_gb]},
-            "total_bytes": ${HARDWARE_INFO[memory_total_bytes]},
-            "tier": "${HARDWARE_INFO[memory_tier]}"
+            "total_gb": ${HARDWARE_INFO[memory_total_gb]:-"8"},
+            "available_gb": ${HARDWARE_INFO[memory_available_gb]:-"4"},
+            "total_bytes": ${HARDWARE_INFO[memory_total_bytes]:-"8589934592"},
+            "tier": "${HARDWARE_INFO[memory_tier]:-"medium"}"
         },
         "storage": {
-            "total_gb": ${HARDWARE_INFO[storage_total_gb]},
-            "ssd_count": ${HARDWARE_INFO[storage_ssd_count]},
-            "hdd_count": ${HARDWARE_INFO[storage_hdd_count]},
-            "nvme_count": ${HARDWARE_INFO[storage_nvme_count]},
-            "tier": "${HARDWARE_INFO[storage_tier]}"
+            "total_gb": ${HARDWARE_INFO[storage_total_gb]:-"100"},
+            "ssd_count": ${HARDWARE_INFO[storage_ssd_count]:-"0"},
+            "hdd_count": ${HARDWARE_INFO[storage_hdd_count]:-"1"},
+            "nvme_count": ${HARDWARE_INFO[storage_nvme_count]:-"0"},
+            "tier": "${HARDWARE_INFO[storage_tier]:-"hdd"}"
         },
         "gpu": {
-            "count": ${HARDWARE_INFO[gpu_count]},
-            "available": "${HARDWARE_INFO[gpu_available]}",
-            "integrated": "${HARDWARE_INFO[gpu_integrated]}"
+            "count": ${HARDWARE_INFO[gpu_count]:-"0"},
+            "available": "${HARDWARE_INFO[gpu_available]:-"false"}",
+            "integrated": "${HARDWARE_INFO[gpu_integrated]:-"none"}"
         },
         "network": {
-            "interface_count": ${HARDWARE_INFO[network_count]},
-            "tier": "${HARDWARE_INFO[network_tier]}"
+            "interface_count": ${HARDWARE_INFO[network_count]:-"1"},
+            "tier": "${HARDWARE_INFO[network_tier]:-"single"}"
         },
         "virtualization": {
-            "type": "${HARDWARE_INFO[virtualization_type]}",
-            "details": "${HARDWARE_INFO[virtualization_details]}",
-            "is_bare_metal": ${HARDWARE_INFO[is_bare_metal]}
+            "type": "${HARDWARE_INFO[virtualization_type]:-"none"}",
+            "details": "${HARDWARE_INFO[virtualization_details]:-"Bare metal system"}",
+            "is_bare_metal": ${HARDWARE_INFO[is_bare_metal]:-"true"}
         },
         "security": {
             "tpm": {
-                "version": "${HARDWARE_INFO[tpm_version]}",
-                "available": ${HARDWARE_INFO[tpm_available]},
-                "device": "${HARDWARE_INFO[tpm_device]}",
-                "tier": "${HARDWARE_INFO[tpm_tier]}"
+                "version": "${HARDWARE_INFO[tpm_version]:-"none"}",
+                "available": ${HARDWARE_INFO[tpm_available]:-"false"},
+                "device": "${HARDWARE_INFO[tpm_device]:-"none"}",
+                "tier": "${HARDWARE_INFO[tpm_tier]:-"none"}"
             },
             "secure_boot": {
-                "status": "${HARDWARE_INFO[secure_boot_status]}",
-                "available": ${HARDWARE_INFO[secure_boot_available]},
-                "tier": "${HARDWARE_INFO[secure_boot_tier]}"
+                "status": "${HARDWARE_INFO[secure_boot_status]:-"unknown"}",
+                "available": ${HARDWARE_INFO[secure_boot_available]:-"false"},
+                "tier": "${HARDWARE_INFO[secure_boot_tier]:-"unavailable"}"
             }
         }
     },
     "optimization": {
-        "profile": "${HARDWARE_INFO[optimization_profile]}",
-        "level": "${HARDWARE_INFO[optimization_level]}",
+        "profile": "${HARDWARE_INFO[optimization_profile]:-"balanced"}",
+        "level": "${HARDWARE_INFO[optimization_level]:-"medium"}",
         "recommendations": $(printf '%s\n' "${HARDWARE_INFO[recommendations]}" 2>/dev/null | jq -R . | jq -s . 2>/dev/null || echo '[]')
     }
 }
@@ -532,37 +563,37 @@ main() {
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
     echo -e "${CYAN}SYSTEM INFORMATION:${NC}"
-    echo "  Hostname: $(hostname)"
-    echo "  Virtualization: ${HARDWARE_INFO[virtualization_details]}"
-    echo "  Bare Metal: ${HARDWARE_INFO[is_bare_metal]}"
+    echo "  Hostname: $(hostname 2>/dev/null || echo "unknown")"
+    echo "  Virtualization: ${HARDWARE_INFO[virtualization_details]:-"Bare metal system"}"
+    echo "  Bare Metal: ${HARDWARE_INFO[is_bare_metal]:-"true"}"
     echo ""
     echo -e "${CYAN}PROCESSOR:${NC}"
-    echo "  Model: ${HARDWARE_INFO[cpu_model]}"
-    echo "  Cores/Threads: ${HARDWARE_INFO[cpu_cores]}/${HARDWARE_INFO[cpu_threads]}"
-    echo "  Optimization: ${HARDWARE_INFO[cpu_optimization]}"
+    echo "  Model: ${HARDWARE_INFO[cpu_model]:-"Unknown CPU"}"
+    echo "  Cores/Threads: ${HARDWARE_INFO[cpu_cores]:-"1"}/${HARDWARE_INFO[cpu_threads]:-"1"}"
+    echo "  Optimization: ${HARDWARE_INFO[cpu_optimization]:-"none"}"
     echo ""
     echo -e "${CYAN}MEMORY:${NC}"
-    echo "  Total: ${HARDWARE_INFO[memory_total_gb]}GB"
-    echo "  Available: ${HARDWARE_INFO[memory_available_gb]}GB"
-    echo "  Tier: ${HARDWARE_INFO[memory_tier]}"
+    echo "  Total: ${HARDWARE_INFO[memory_total_gb]:-"8"}GB"
+    echo "  Available: ${HARDWARE_INFO[memory_available_gb]:-"4"}GB"
+    echo "  Tier: ${HARDWARE_INFO[memory_tier]:-"medium"}"
     echo ""
     echo -e "${CYAN}STORAGE:${NC}"
-    echo "  Total: ${HARDWARE_INFO[storage_total_gb]}GB"
-    echo "  SSD/HDD/NVMe: ${HARDWARE_INFO[storage_ssd_count]}/${HARDWARE_INFO[storage_hdd_count]}/${HARDWARE_INFO[storage_nvme_count]}"
-    echo "  Tier: ${HARDWARE_INFO[storage_tier]}"
+    echo "  Total: ${HARDWARE_INFO[storage_total_gb]:-"100"}GB"
+    echo "  SSD/HDD/NVMe: ${HARDWARE_INFO[storage_ssd_count]:-"0"}/${HARDWARE_INFO[storage_hdd_count]:-"1"}/${HARDWARE_INFO[storage_nvme_count]:-"0"}"
+    echo "  Tier: ${HARDWARE_INFO[storage_tier]:-"hdd"}"
     echo ""
     echo -e "${CYAN}SECURITY:${NC}"
-    echo "  TPM: ${HARDWARE_INFO[tpm_version]} (${HARDWARE_INFO[tpm_available]})"
-    echo "  Secure Boot: ${HARDWARE_INFO[secure_boot_status]} (${HARDWARE_INFO[secure_boot_available]})"
+    echo "  TPM: ${HARDWARE_INFO[tpm_version]:-"none"} (${HARDWARE_INFO[tpm_available]:-"false"})"
+    echo "  Secure Boot: ${HARDWARE_INFO[secure_boot_status]:-"unknown"} (${HARDWARE_INFO[secure_boot_available]:-"false"})"
     echo ""
     echo -e "${CYAN}OPTIMIZATION PROFILE:${NC}"
-    echo "  Profile: ${HARDWARE_INFO[optimization_profile]}"
-    echo "  Level: ${HARDWARE_INFO[optimization_level]}"
+    echo "  Profile: ${HARDWARE_INFO[optimization_profile]:-"balanced"}"
+    echo "  Level: ${HARDWARE_INFO[optimization_level]:-"medium"}"
     echo ""
     echo -e "${CYAN}RECOMMENDATIONS:${NC}"
     printf '%s\n' "${HARDWARE_INFO[recommendations]}" 2>/dev/null | sed 's/^/  • /'
     echo ""
-    echo -e "${GREEN}Report saved to: ${HARDWARE_INFO[report_file]}${NC}"
+    echo -e "${GREEN}Report saved to: ${HARDWARE_INFO[report_file]:-"/tmp/hardware-report.json"}${NC}"
     echo ""
 }
 
